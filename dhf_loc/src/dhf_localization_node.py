@@ -26,10 +26,11 @@ class DhfLocalizationNode():
         map_data = np.asarray( map_message.data )
         width = map_message.info.width
         height = map_message.info.height
+        resolution = map_message.info.resolution
         map_array = map_data.reshape(height,width)
-        ogm = GridMap.load_grid_map_from_array(map_array,resolution=map_message.info.resolution,center_x=10,center_y=10.05)
-        # ogm.plot_grid_map()
-        # plt.show()
+        center_x = 10 #TODO
+        center_y = 10.05 #TODO
+        ogm = GridMap.load_grid_map_from_array(map_array,resolution,center_x,center_y)
         
 
 
