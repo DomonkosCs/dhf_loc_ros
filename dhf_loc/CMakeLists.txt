@@ -9,6 +9,7 @@ project(dhf_loc)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   rospy
+  nav_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -159,6 +160,7 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   scripts/test_publisher.py
+  src/dhf_localization_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
