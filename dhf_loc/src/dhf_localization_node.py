@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 
 import rospy
+import message_filters
 from nav_msgs.srv import GetMap
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +13,17 @@ from dhflocalization.gridmap import GridMap
 class DhfLocalizationNode():
     def __init__(self) -> None:
         rospy.init_node('dhf_localization_node')
-        pass
+
+        self.sub_scan = message_filters.Subscriber("scan", LaserScan)
+        self.sub_odom = message_filters.Subscriber("odom", Odometry )
+
+        # rate of odom is 30 hz, rate of scan is 5 hz
+        time_sync = message_filters.ApproximateTimeSynchronizer([self.sub_scan,self.sub_odom],100,0.1)
+        time_sync.registerCallback(self.cb_scan_odom)
+    
+    def cb_scan_odom(self,scan_msg, odom_msg):
+        rospy.loginfo(scan_msg.header)
+        rospy.loginfo(odom_msg.header)
 
     def get_map(self):
         rospy.wait_for_service("static_map")
@@ -37,5 +50,4 @@ class DhfLocalizationNode():
 
 if __name__ == '__main__':
     dhf_localization_node = DhfLocalizationNode()
-    dhf_localization_node.get_map()
     rospy.spin()
