@@ -10,6 +10,9 @@ project(dhf_loc)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   nav_msgs
+  sensor_msgs
+  tf2_ros
+  message_filters
 )
 
 ## System dependencies are found with CMake's conventions
