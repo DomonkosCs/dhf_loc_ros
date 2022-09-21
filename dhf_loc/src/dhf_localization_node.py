@@ -2,7 +2,6 @@
 
 import rospy
 import message_filters
-import tf2_ros
 from tf.transformations import euler_from_quaternion
 from nav_msgs.srv import GetMap
 from nav_msgs.msg import Odometry

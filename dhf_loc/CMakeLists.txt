@@ -11,7 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   nav_msgs
   sensor_msgs
-  tf2_ros
+  tf
   message_filters
 )
 

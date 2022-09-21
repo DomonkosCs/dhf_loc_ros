@@ -53,7 +53,7 @@
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>message_filters</depend>
-  <depend>tf2_ros</depend>
+  <depend>tf</depend>
 
   <!-- The export tag contains other, unspecified, tags -->
   <export>
