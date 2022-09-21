@@ -2,13 +2,15 @@
 
 import rospy
 import message_filters
-import tf
+import tf2_ros
+from tf.transformations import euler_from_quaternion
 from nav_msgs.srv import GetMap
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
+
 from dhflocalization.gridmap import GridMap
 
 class DhfLocalizationNode():
@@ -18,8 +20,6 @@ class DhfLocalizationNode():
         self.sub_scan = message_filters.Subscriber("scan", LaserScan)
         self.sub_odom = message_filters.Subscriber("odom", Odometry )
 
-        self.prev_planar_pose = None
-
         # rate of odom is 30 hz, rate of scan is 5 hz
         time_sync = message_filters.ApproximateTimeSynchronizer([self.sub_scan,self.sub_odom],100,0.1)
         time_sync.registerCallback(self.cb_scan_odom)
@@ -27,15 +27,8 @@ class DhfLocalizationNode():
     def cb_scan_odom(self,scan_msg, odom_msg):
 
         planar_pose = self.extract_odom_msg(odom_msg)
-
-        if self.prev_planar_pose is None:
-            self.prev_planar_pose = planar_pose
-            return
-            
-        odom_diff = planar_pose - self.prev_planar_pose
-        rospy.loginfo(odom_diff)
+        scan = self.extract_scan_msg(scan_msg)
         
-        self.prev_planar_pose = planar_pose
     
     def extract_odom_msg(self,odom_msg):
         pose = odom_msg.pose.pose
@@ -48,11 +41,16 @@ class DhfLocalizationNode():
         x = pose.position.x
         y = pose.position.y
 
-        euler = tf.transformations.euler_from_quaternion(quaternion)
+        euler = euler_from_quaternion(quaternion)
         yaw = euler[2]
 
+        return [x,y,yaw]
 
-        return np.array([x,y,yaw])
+    def extract_scan_msg(self,scan_msg):
+        ranges = [None if elem == float('inf') else round(elem,3) for elem in scan_msg.ranges]
+
+        return ranges
+
 
     def get_map(self):
         rospy.wait_for_service("static_map")
