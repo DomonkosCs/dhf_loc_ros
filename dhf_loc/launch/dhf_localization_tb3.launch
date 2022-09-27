@@ -1,8 +1,10 @@
 <?xml version="1.0"?>
 <launch>
+    <arg name="map_name" default="tb3_house_true" doc="Name of the map yaml file without extension, contained in the assets folder." />
 
     <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch" />
     <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote.launch" />
+    <node name="map_server" pkg="map_server" type="map_server" output="screen" args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
     <!-- <include file="$(find dhf_loc)/launch/dhf_localization_demo.launch" /> -->
 
     <node name="rviz" pkg="rviz" type="rviz" />
