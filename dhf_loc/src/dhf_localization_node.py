@@ -2,7 +2,15 @@
 
 import rospy
 import message_filters
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from tf.transformations import (
+    euler_from_quaternion,
+    quaternion_from_euler,
+    translation_matrix,
+    quaternion_matrix,
+    concatenate_matrices,
+    translation_from_matrix,
+    quaternion_from_matrix,
+)
 
 # TODO replace with tf_conversions, see tf2 tutorial
 import tf2_ros
@@ -17,6 +25,7 @@ from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
+from dhflocalization.customtypes import ParticleState, StateHypothesis
 
 
 class DhfLocalizationNode:
@@ -25,11 +34,16 @@ class DhfLocalizationNode:
         rospy.loginfo("Node created")
 
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+
         self.sub_scan = message_filters.Subscriber("scan", LaserScan)
         self.sub_odom = message_filters.Subscriber("odom", Odometry)
 
         self.gridmap = None
         self.prev_odom = None
+        self.prior = None
+        self.ekf_prior = None
         self.filter_initialized = False
         self.measurement_processer = None
 
@@ -61,6 +75,8 @@ class DhfLocalizationNode:
         odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
 
+        scan_timestamp = scan_msg.header.stamp
+
         if self.prev_odom is None:
             self.prev_odom = odom
             rospy.loginfo("Ignoring first detection.")
@@ -71,18 +87,71 @@ class DhfLocalizationNode:
 
         control_input = [self.prev_odom, odom]
 
-        self.edh.propagate(control_input)
-        ekf_propagated_state = self.ekf.propagate(control_input, return_state=True)
-        self.edh.update(ekf_propagated_state.covar, measurement)
-        self.ekf.update(measurement)
+        prediction = self.edh.propagate(self.prior, control_input)
+        ekf_prediction = self.ekf.propagate(self.ekf_prior, control_input)
+        posterior = self.edh.update(prediction, ekf_prediction, measurement)
+        ekf_posterior = self.ekf.update(ekf_prediction, measurement)
 
-        rospy.loginfo(self.edh.filtered_states[-1].pose)
+        particle_mean = posterior.mean()
+        rospy.loginfo(particle_mean)
 
-        filtered_state = self.edh.filtered_states[-1].pose
+        map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
 
-        self.broadcast_pose(filtered_state)
+        base_to_odom = self.tf_buffer.lookup_transform(
+            "odom", "base_footprint", scan_timestamp
+        )
+        base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
+
+        map_to_odom_msg = self.msg_from_transformation_matrix(
+            map_to_base_tr @ base_to_odom_tr
+        )
+        self.tf_broadcaster.sendTransform(map_to_odom_msg)
+
+        self.prior = posterior
+        self.ekf_prior = ekf_posterior
 
         self.prev_odom = odom
+
+    def transformation_matrix_from_state(self, state):
+        tran = translation_matrix([state[0], state[1], 0])
+        rot = quaternion_matrix(quaternion_from_euler(0, 0, state[2]))
+        transformation_matrix = concatenate_matrices(tran, rot)
+        return transformation_matrix
+
+    def transformation_matrix_from_msg(self, msg):
+        tran = msg.transform.translation
+        tran_matrix = translation_matrix([tran.x, tran.y, tran.z])
+        rot = msg.transform.rotation
+        rot_matrix = quaternion_matrix(
+            [
+                rot.x,
+                rot.y,
+                rot.z,
+                rot.w,
+            ]
+        )
+
+        transformation_matrix = concatenate_matrices(tran_matrix, rot_matrix)
+        return transformation_matrix
+
+    def msg_from_transformation_matrix(self, tr_matrix):
+        tran = translation_from_matrix(tr_matrix)
+        rot = quaternion_from_matrix(tr_matrix)
+
+        msg = TransformStamped()
+        msg.header.stamp = rospy.Time.now()  # TODO future dating
+        msg.header.frame_id = "map"
+        msg.child_frame_id = "odom"
+        msg.transform.translation.x = tran[0]
+        msg.transform.translation.y = tran[1]
+        msg.transform.translation.z = tran[2]
+
+        msg.transform.rotation.x = rot[0]
+        msg.transform.rotation.y = rot[1]
+        msg.transform.rotation.z = rot[2]
+        msg.transform.rotation.w = rot[3]
+
+        return msg
 
     def extract_odom_msg(self, odom_msg):
         """Creates a planar pose vector from the odom message.
@@ -220,11 +289,11 @@ class DhfLocalizationNode:
         transform.header.stamp = rospy.Time.now()
         transform.header.frame_id = "map"
         transform.child_frame_id = "base_footprint"
-        transform.transform.translation.x = pose[0, 0]
-        transform.transform.translation.y = pose[1, 0]
+        transform.transform.translation.x = pose[0]
+        transform.transform.translation.y = pose[1]
         transform.transform.translation.z = 0.0
 
-        quat = quaternion_from_euler(0, 0, pose[2, 0])
+        quat = quaternion_from_euler(0, 0, pose[2])
         transform.transform.rotation.x = quat[0]
         transform.transform.rotation.y = quat[1]
         transform.transform.rotation.z = quat[2]
@@ -253,7 +322,7 @@ class DhfLocalizationNode:
             self.gridmap, cfg_measurement_range_noise_std
         )
 
-        cfg_edh_particle_number = 1000
+        cfg_edh_particle_number = 100
         cfg_edh_lambda_number = 10
         cfg_init_gaussian_mean = np.array([-3.0, 1.0, 0])
         cfg_init_gaussian_covar = np.array(
@@ -270,13 +339,13 @@ class DhfLocalizationNode:
             particle_num=cfg_edh_particle_number,
             lambda_num=cfg_edh_lambda_number,
         )
-        self.edh.init_particles_from_gaussian(
-            cfg_init_gaussian_mean, cfg_init_gaussian_covar, return_state=False
-        )
 
-        # Another option is to set the return_state flag on edh.init_particles_from_gaussian,
-        # and use returned state to initialize ekf.
-        self.ekf.init_state(mean=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar)
+        self.prior = ParticleState.init_from_gaussian(
+            cfg_init_gaussian_mean, cfg_init_gaussian_covar, cfg_edh_particle_number
+        )
+        self.ekf_prior = StateHypothesis(
+            state_vector=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar
+        )
 
 
 if __name__ == "__main__":
