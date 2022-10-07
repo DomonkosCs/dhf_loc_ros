@@ -132,12 +132,14 @@ class DhfLocalizationNode:
         transformation_matrix = concatenate_matrices(tran_matrix, rot_matrix)
         return transformation_matrix
 
-    def msg_from_transformation_matrix(self, tr_matrix):
+    def msg_from_transformation_matrix(self, tr_matrix, stamp):
         tran = translation_from_matrix(tr_matrix)
         rot = quaternion_from_matrix(tr_matrix)
 
+        tolerance = 0.1
+
         msg = TransformStamped()
-        msg.header.stamp = rospy.Time.now()  # TODO future dating
+        msg.header.stamp = rospy.Time(stamp.to_time() + tolerance)
         msg.header.frame_id = "map"
         msg.child_frame_id = "odom"
         msg.transform.translation.x = tran[0]
