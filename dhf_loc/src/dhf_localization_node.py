@@ -97,13 +97,11 @@ class DhfLocalizationNode:
 
         map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
 
-        base_to_odom = self.tf_buffer.lookup_transform(
-            "odom", "base_footprint", scan_timestamp
-        )
+        base_to_odom = self.tf_buffer.lookup_transform("odom", "base_footprint", rospy.Time())
         base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
 
         map_to_odom_msg = self.msg_from_transformation_matrix(
-            map_to_base_tr @ base_to_odom_tr
+            map_to_base_tr @ base_to_odom_tr, scan_timestamp
         )
         self.tf_broadcaster.sendTransform(map_to_odom_msg)
 
