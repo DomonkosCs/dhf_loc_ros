@@ -97,7 +97,9 @@ class DhfLocalizationNode:
 
         map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
 
-        base_to_odom = self.tf_buffer.lookup_transform("odom", "base_footprint", rospy.Time())
+        base_to_odom = self.tf_buffer.lookup_transform(
+            "odom", "base_footprint", rospy.Time()
+        )
         base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
 
         map_to_odom_msg = self.msg_from_transformation_matrix(
@@ -120,14 +122,7 @@ class DhfLocalizationNode:
         tran = msg.transform.translation
         tran_matrix = translation_matrix([tran.x, tran.y, tran.z])
         rot = msg.transform.rotation
-        rot_matrix = quaternion_matrix(
-            [
-                rot.x,
-                rot.y,
-                rot.z,
-                rot.w,
-            ]
-        )
+        rot_matrix = quaternion_matrix([rot.x, rot.y, rot.z, rot.w,])
 
         transformation_matrix = concatenate_matrices(tran_matrix, rot_matrix)
         return transformation_matrix
@@ -228,6 +223,7 @@ class DhfLocalizationNode:
         rospy.wait_for_service("static_map")
         try:
             map_response = self.srv_get_map()
+            rospy.loginfo("Map received")
             return map_response
         except rospy.ServiceException as e:
             rospy.loginfo("Service call failed: %s" % e)
@@ -326,7 +322,7 @@ class DhfLocalizationNode:
         cfg_edh_lambda_number = 10
         cfg_init_gaussian_mean = np.array([-3.0, 1.0, 0])
         cfg_init_gaussian_covar = np.array(
-            [[0.1**2, 0, 0], [0, 0.1**2, 0], [0, 0, 0.05**2]]
+            [[0.1 ** 2, 0, 0], [0, 0.1 ** 2, 0], [0, 0, 0.05 ** 2]]
         )
 
         self.measurement_processer = MeasurementProcessor(
