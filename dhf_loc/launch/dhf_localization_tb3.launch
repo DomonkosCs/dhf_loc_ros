@@ -3,11 +3,15 @@
     <arg name="map_name" default="tb3_house_true" doc="Name of the map yaml file without extension, contained in the assets folder." />
 
     <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch" />
-    <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote.launch" />
-    <node name="map_server" pkg="map_server" type="map_server" output="screen" args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
-    <!-- <include file="$(find dhf_loc)/launch/dhf_localization_demo.launch" /> -->
 
-    <node name="rviz" pkg="rviz" type="rviz" />
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+        <param name="publish_frequency" type="double" value="50.0" />
+        <param name="tf_prefix" value="" />
+    </node>
+
+    <node name="map_server" pkg="map_server" type="map_server" output="screen" args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
+
+    <node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find dhf_loc)/rviz/default.rviz" />
 
 
 </launch>
