@@ -71,6 +71,7 @@ class DhfLocalizationNode:
 
         if not self.filter_initialized:
             self.init_filter()
+            self.filter_initialized = True
 
         odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
