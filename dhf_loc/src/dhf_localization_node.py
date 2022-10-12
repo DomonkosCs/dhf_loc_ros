@@ -56,7 +56,7 @@ class DhfLocalizationNode:
             self.topicdata = []
 
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_scan, self.sub_odom], 100, 0.1
+            [self.sub_scan, self.sub_odom], 100, 0.05
         )
         time_sync_sensors.registerCallback(self.cb_scan_odom)
 
@@ -83,10 +83,14 @@ class DhfLocalizationNode:
         scan_timestamp = scan_msg.header.stamp
 
         if self.prev_odom is None:
+            rospy.loginfo(
+                "I am initializing at {}s".format(scan_msg.header.stamp.to_sec())
+            )
             self.prev_odom = odom
             rospy.loginfo("Ignoring first detection.")
             return
 
+        rospy.loginfo("I am running at {}s".format(scan_msg.header.stamp.to_sec()))
         measurement = self.process_scan(scan)
         measurement = self.measurement_processer.filter_measurements(measurement)
 
@@ -98,7 +102,6 @@ class DhfLocalizationNode:
         ekf_posterior = self.ekf.update(ekf_prediction, measurement)
 
         particle_mean = posterior.mean()
-        rospy.loginfo(particle_mean)
 
         map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
 
@@ -343,7 +346,7 @@ class DhfLocalizationNode:
             self.gridmap, cfg_measurement_range_noise_std
         )
 
-        cfg_edh_particle_number = 100
+        cfg_edh_particle_number = 1000
         cfg_edh_lambda_number = 10
         cfg_init_gaussian_mean = np.array([-3.0, 1.0, 0])
         cfg_init_gaussian_covar = np.array(
