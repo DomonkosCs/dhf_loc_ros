@@ -20,6 +20,7 @@ from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import TransformStamped
 
 import numpy as np
+import json
 
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
@@ -50,7 +51,10 @@ class DhfLocalizationNode:
         self.srv_get_map = rospy.ServiceProxy("static_map", GetMap)
         self.gridmap = self.get_map()
 
-        # rate of odom is 30 hz, rate of scan is 5 hz
+        self.export_data = False
+        if self.export_data:
+            self.topicdata = []
+
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
             [self.sub_scan, self.sub_odom], 100, 0.1
         )
@@ -112,6 +116,23 @@ class DhfLocalizationNode:
         self.ekf_prior = ekf_posterior
 
         self.prev_odom = odom
+
+        if self.export_data:
+            self.log_data(scan_timestamp, odom, particle_mean, scan)
+
+    def log_data(self, timestamp, odom, filtered_state, scan):
+        self.topicdata.append(
+            {
+                "t": timestamp.to_sec(),
+                "pose": [round(odom[0], 3), round(odom[1], 3), round(odom[2], 3),],
+                "truth": [
+                    round(filtered_state[0], 3),
+                    round(filtered_state[1], 3),
+                    round(filtered_state[2], 3),
+                ],
+                "scan": scan,
+            }
+        )
 
     def transformation_matrix_from_state(self, state):
         tran = translation_matrix([state[0], state[1], 0])
@@ -345,6 +366,17 @@ class DhfLocalizationNode:
         )
 
 
+def save_data(data, filename="topicexport.json"):
+    
+    # Writes file to ~/.ros/ directory by default 
+    # if the node is launched in debug mode.
+    with open(filename, "w") as file:
+        json.dump({"data": data}, file)
+
+
 if __name__ == "__main__":
     dhf_localization_node = DhfLocalizationNode()
     rospy.spin()
+
+    if dhf_localization_node.export_data:
+        rospy.on_shutdown(lambda: save_data(dhf_localization_node.topicdata))
