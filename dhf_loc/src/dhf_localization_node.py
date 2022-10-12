@@ -320,6 +320,8 @@ class DhfLocalizationNode:
         self.tf_broadcaster.sendTransform(transform)
 
     def init_filter(self):
+        cfg_random_seed = 2021
+        rng = np.random.default_rng(cfg_random_seed)
         cfg_max_ray_number = 500
         cfg_odometry_alpha_1 = 0.1
         cfg_odometry_alpha_2 = 0.1
@@ -332,7 +334,8 @@ class DhfLocalizationNode:
                 cfg_odometry_alpha_2,
                 cfg_odometry_alpha_3,
                 cfg_odometry_alpha_4,
-            ]
+            ],
+            rng=rng,
         )
 
         cfg_measurement_range_noise_std = 0.01
@@ -359,7 +362,10 @@ class DhfLocalizationNode:
         )
 
         self.prior = ParticleState.init_from_gaussian(
-            cfg_init_gaussian_mean, cfg_init_gaussian_covar, cfg_edh_particle_number
+            cfg_init_gaussian_mean,
+            cfg_init_gaussian_covar,
+            cfg_edh_particle_number,
+            rng=rng,
         )
         self.ekf_prior = StateHypothesis(
             state_vector=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar
