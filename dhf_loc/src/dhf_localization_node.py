@@ -100,16 +100,13 @@ class DhfLocalizationNode:
         ekf_prediction = self.ekf.propagate(self.ekf_prior, control_input)
         posterior = self.edh.update(prediction, ekf_prediction, measurement)
         ekf_posterior = self.ekf.update(ekf_prediction, measurement)
-
         particle_mean = posterior.mean()
 
         map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
-
         base_to_odom = self.tf_buffer.lookup_transform(
-            "odom", "base_footprint", rospy.Time()
+            "base_footprint", "odom", rospy.Time()
         )
         base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
-
         map_to_odom_msg = self.msg_from_transformation_matrix(
             map_to_base_tr @ base_to_odom_tr, scan_timestamp
         )
@@ -127,7 +124,11 @@ class DhfLocalizationNode:
         self.topicdata.append(
             {
                 "t": timestamp.to_sec(),
-                "pose": [round(odom[0], 3), round(odom[1], 3), round(odom[2], 3),],
+                "pose": [
+                    round(odom[0], 3),
+                    round(odom[1], 3),
+                    round(odom[2], 3),
+                ],
                 "truth": [
                     round(filtered_state[0], 3),
                     round(filtered_state[1], 3),
@@ -147,7 +148,14 @@ class DhfLocalizationNode:
         tran = msg.transform.translation
         tran_matrix = translation_matrix([tran.x, tran.y, tran.z])
         rot = msg.transform.rotation
-        rot_matrix = quaternion_matrix([rot.x, rot.y, rot.z, rot.w,])
+        rot_matrix = quaternion_matrix(
+            [
+                rot.x,
+                rot.y,
+                rot.z,
+                rot.w,
+            ]
+        )
 
         transformation_matrix = concatenate_matrices(tran_matrix, rot_matrix)
         return transformation_matrix
@@ -350,7 +358,7 @@ class DhfLocalizationNode:
         cfg_edh_lambda_number = 10
         cfg_init_gaussian_mean = np.array([-3.0, 1.0, 0])
         cfg_init_gaussian_covar = np.array(
-            [[0.1 ** 2, 0, 0], [0, 0.1 ** 2, 0], [0, 0, 0.05 ** 2]]
+            [[0.1**2, 0, 0], [0, 0.1**2, 0], [0, 0, 0.05**2]]
         )
 
         self.measurement_processer = MeasurementProcessor(
@@ -376,8 +384,8 @@ class DhfLocalizationNode:
 
 
 def save_data(data, filename="topicexport.json"):
-    
-    # Writes file to ~/.ros/ directory by default 
+
+    # Writes file to ~/.ros/ directory by default
     # if the node is launched in debug mode.
     with open(filename, "w") as file:
         json.dump({"data": data}, file)
