@@ -166,11 +166,11 @@ class DhfLocalizationNode:
             pose.orientation.w,
         )
 
-        x = pose.position.x
-        y = pose.position.y
+        x = round(pose.position.x, 3)
+        y = round(pose.position.y, 3)
 
         euler = euler_from_quaternion(quaternion)
-        yaw = euler[2]
+        yaw = round(euler[2], 3)
 
         return [x, y, yaw]
 
