@@ -30,6 +30,30 @@ from dhflocalization.customtypes import ParticleState, StateHypothesis
 
 
 class DhfLocalizationNode:
+    """Performs planar localization of a mobile robot on a given map.
+
+    This node assumes a robot with differential drive and a single LiDAR sensor.
+    The localization is performed on an occupancy grid map.
+
+    Configuration:
+        TBA
+
+    Subscribers:
+        ~scan (:obj:`sensros_msgs.msg.LaserScan`): Range readings from the LiDAR.
+        ~odom (:obj:`nav_msgs.msg.Odometry`): The odometry of the differential drive robot.
+
+    Called Services:
+        ~static_map (:obj:`nav_msgs.srv.GetMap`): The static map to be localized on.
+
+    Required Transforms:
+        ~base_footprint -> ~odom_frame
+        ~scan_frame -> ~base_footprint
+
+    Provided Transforms:
+        ~map_frame -> ~odom_frame
+
+    """
+
     def __init__(self) -> None:
         rospy.init_node("dhf_localization_node")
         rospy.loginfo("Localization node created")
@@ -51,7 +75,7 @@ class DhfLocalizationNode:
         self.gridmap = None
         self.gridmap = self.get_map()
 
-        self.export_data = False
+        self.export_data = True
         if self.export_data:
             self.topicdata = []
 
@@ -67,7 +91,7 @@ class DhfLocalizationNode:
 
         Args:
             scan_msg (:obj:`sensor_msgs.msg.LaserScan`): Laser scan from LiDAR.
-            odom_msg (:obj:`nav_msgs.msg.Odomery`): Odom message from the wheel encoders.
+            odom_msg (:obj:`nav_msgs.msg.Odometry`): Odom message from the wheel encoders.
         """
         if self.gridmap is None:
             rospy.loginfo("Waiting for map.")
@@ -109,9 +133,17 @@ class DhfLocalizationNode:
         self.prev_odom = odom
 
         if self.export_data:
-            self.log_data(detection_timestamp, odom, particle_mean, scan)
+            self.log_data(odom, scan, particle_mean, detection_timestamp)
 
-    def log_data(self, timestamp, odom, filtered_state, scan):
+    def log_data(self, odom, scan, filtered_state, timestamp):
+        """Creates one log entry of the given data. Appends it to the log.
+
+        Args:
+            odom (:obj:`list`): Odomerty data: x,y,heading.
+            scan (:obj:`list`): List of range measurements.
+            filtered_state (:obj:`(3,1) np.ndarray`): Output of the filter: x,y,heading
+            timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry.
+        """
         self.topicdata.append(
             {
                 "t": timestamp.to_sec(),
@@ -130,12 +162,28 @@ class DhfLocalizationNode:
         )
 
     def transformation_matrix_from_state(self, state):
+        """Creates a homogeneous transformation matrix.
+
+        Args:
+            state (:obj:`(3,1) np.ndarray`): Planar pose of the robot: x,y,heading
+
+        Returns:
+            :obj:`(4,4) np.ndarray`: Homogeneous transformation matrix.
+        """
         tran = translation_matrix([state[0], state[1], 0])
         rot = quaternion_matrix(quaternion_from_euler(0, 0, state[2]))
         transformation_matrix = concatenate_matrices(tran, rot)
         return transformation_matrix
 
     def transformation_matrix_from_msg(self, msg):
+        """Creates a homogeneous transformation matrix from a message.
+
+        Args:
+            msg (:obj:`geometry_msgs.msg.TransformStamped`): Transform message.
+
+        Returns:
+            :obj:`(4,4) np.ndarray`: Homogeneous transformation matrix.
+        """
         tran = msg.transform.translation
         tran_matrix = translation_matrix([tran.x, tran.y, tran.z])
         rot = msg.transform.rotation
@@ -151,14 +199,26 @@ class DhfLocalizationNode:
         transformation_matrix = concatenate_matrices(tran_matrix, rot_matrix)
         return transformation_matrix
 
-    def msg_from_transformation_matrix(self, tr_matrix, stamp):
+    def msg_from_transformation_matrix(self, tr_matrix, timestamp):
+        """Creates a message from a homogeneous transformation matrix.
+
+        The transformation is between the `map` frame and the `odom` frame,
+        and used to correct the odometry drift.
+
+        Args:
+            tr_matrix (:obj:`(4,4) np.ndarray`): Homogeneous transformation matrix.
+            stamp (:obj:`genpy.rostime.Time`): Timestamp of the message.
+
+        Returns:
+            :obj:`geometry_msgs.msg.TransformStamped`: Transform message.
+        """
         tran = translation_from_matrix(tr_matrix)
         rot = quaternion_from_matrix(tr_matrix)
 
         tolerance = 0.1
 
         msg = TransformStamped()
-        msg.header.stamp = rospy.Time(stamp.to_time() + tolerance)
+        msg.header.stamp = rospy.Time(timestamp.to_time() + tolerance)
         msg.header.frame_id = "map"
         msg.child_frame_id = "odom"
         msg.transform.translation.x = tran[0]
@@ -179,7 +239,7 @@ class DhfLocalizationNode:
             odom_msg (:obj:`nav_msgs.msg.Odomery`)
 
         Returns:
-            :obj:`list` Containing the x,y position in ``m`` and the yaw angle in ``rad``.
+            :obj:`list` Containing the x,y position in `m` and the yaw angle in `rad`.
         """
         pose = odom_msg.pose.pose
         quaternion = (
@@ -200,7 +260,7 @@ class DhfLocalizationNode:
     def extract_scan_msg(self, scan_msg):
         """Extracts distance readings from the laser scan.
 
-        ``inf`` readings are substituted by ``None``.
+        `inf` readings are substituted by `None`.
 
         Args:
             scan_msg (:obj:`sensor_msgs.msg.LaserScan`)
@@ -219,7 +279,7 @@ class DhfLocalizationNode:
         """Appends angles to the range-only scan readings.
 
         Assumes that every range reading is evenly distributed accross 360 degs.
-        Ranges with value ``None`` are excluded together with their angle.
+        Ranges with value `None` are excluded together with their angle.
 
         Args:
             scan (:obj:`list`): Range readings.
@@ -237,11 +297,11 @@ class DhfLocalizationNode:
     def get_map_from_srv(self):
         """Requests the occupancy grid map.
 
-        Calls the service ``static_map`` from the ``map_server`` node which returns a request (:obj:`nav_msgs.srv.GetMap`)
+        Calls the service `static_map` from the `map_server` node which returns a request (:obj:`nav_msgs.srv.GetMap`)
 
         Returns:
             :obj:`nav_msgs.srv.GetMap`: The message for successful srv. call,
-            or ``None`` if the call has failed.
+            or `None` if the call has failed.
 
         """
         rospy.wait_for_service("static_map")
@@ -254,7 +314,7 @@ class DhfLocalizationNode:
             return None
 
     def get_map(self):
-        """Creates the ``GridMap`` for the localization.
+        """Creates the `GridMap` for the localization.
 
         Returns:
             :obj:`dhflocalization.gridmap.GridMap`: The internal object for handling the OGM.
@@ -282,8 +342,8 @@ class DhfLocalizationNode:
     def convert_occupancy_representation(self, map_array):
         """Converts cell occupancy value representation.
 
-        The ``map_server`` node uses the value ``100`` to indicate occupied cells,
-        ``-1`` for unknown and `0` for free. This function tranforms these values to
+        The `map_server` node uses the value `100` to indicate occupied cells,
+        `-1` for unknown and `0` for free. This function tranforms these values to
         `0` representing free and unknown cells, and `1` representing the occupied ones.
 
         Args:
@@ -300,7 +360,7 @@ class DhfLocalizationNode:
     def broadcast_pose(self, pose):
         """Broadcast the transormation between the map and the robot.
 
-        Uses the ``map`` frame as a base and the ``base_footprint`` as the child.
+        Uses the `map` frame as a base and the `base_footprint` as the child.
 
         Args:
             pose (:obj:`(3,1) np.ndarray`): Array containing the x,y poses and the yaw angle.
@@ -322,11 +382,18 @@ class DhfLocalizationNode:
         self.tf_broadcaster.sendTransform(transform)
 
     def handle_first_detection(self, odom, timestamp):
+        """Initializes filter and handles first odometry message.
+
+        Args:
+            odom (:obj:`list`): List, containing the odometry.
+            timestamp (:obj:`float`): Timestamp of the init in seconds.
+        """
         self.init_filter()
         rospy.loginfo("I am initializing at {}s".format(timestamp))
         self.prev_odom = odom
 
     def init_filter(self):
+        """Initializes the filters using the ROS parameter server."""
         cfg_random_seed = 2021
         rng = np.random.default_rng(cfg_random_seed)
         cfg_max_ray_number = 500
@@ -380,9 +447,15 @@ class DhfLocalizationNode:
 
 
 def save_data(data, filename="topicexport.json"):
+    """Saves data to a file in `json` format.
 
-    # Writes file to ~/.ros/ directory by default
-    # if the node is launched in debug mode.
+    If run from VSCode debug mode, the file is saved to `~/.ros/` by default.
+
+    Args:
+        data (:obj:`dict`): Data to be exported.
+        filename (:obj:`str`, optional): Name of the file with extension. Defaults to "topicexport.json".
+    """
+
     with open(filename, "w") as file:
         json.dump({"data": data}, file)
 
