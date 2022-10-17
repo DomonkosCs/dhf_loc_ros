@@ -1,7 +1,10 @@
 #!/usr/bin/env python
+import numpy as np
+import json
 
 import rospy
 import message_filters
+import tf2_ros  # TODO replace with tf_conversions, see tf2 tutorial
 from tf.transformations import (
     euler_from_quaternion,
     quaternion_from_euler,
@@ -12,45 +15,72 @@ from tf.transformations import (
     quaternion_from_matrix,
 )
 
-# TODO replace with tf_conversions, see tf2 tutorial
-import tf2_ros
-from nav_msgs.srv import GetMap
-from nav_msgs.msg import Odometry
-from sensor_msgs.msg import LaserScan
-from geometry_msgs.msg import TransformStamped
-
-import numpy as np
-import json
-
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
 from dhflocalization.customtypes import ParticleState, StateHypothesis
 
+from nav_msgs.srv import GetMap
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
+from geometry_msgs.msg import TransformStamped
+
 
 class DhfLocalizationNode:
     """Performs planar localization of a mobile robot on a given map.
 
-    This node assumes a robot with differential drive and a single LiDAR sensor.
+    This node assumes a robot with differential drive and a single, horizontally-mounted, fixed 360° LiDAR sensor.
     The localization is performed on an occupancy grid map.
+    The algorithm uses the log-homotopy particle flow filter for state estimation (developed by Daum and Huang),
+    a chamfer distance based method as measurement model (developed by Dantanarayana and Ranasinghe),
+    and the odometry motion model (developed by Thrun et al.).
 
     Configuration:
-        TBA
+        ~particles (:obj:`int`): Number of particles to be used in the particle flow filter.
+        ~pseudo_timesteps (:obj:`int`): Number of equal homotopy steps to perform the filter update.
+        ~transform_tolerance (:obj:`float`): Time in seconds to post-date the `~map_frame` -> `odom_frame` transformation.
+        ~detection_tolerance (:obj:`float`): Tolerance in seconds between the `LaserScan` and the `Odometry` message
+        to be associated together.
+        ~max_ray_number (:obj:`int`): Max number of laser rays to be used. Unused rays are eliminated
+        evenly.
+        ~odometry_alpha_1 (:obj:`float`): Odometry noise to account for error
+        in the rotation estimate based on the performed rotation. (deg/deg)
+        ~odometry_alpha_2 (:obj:`float`): Odometry noise to account for error
+        in the rotation estimate based on the performed translation. (deg/m)
+        ~odometry_alpha_3 (:obj:`float`): Odometry noise to account for error
+        in the translation estimate based on the performed translation. (m/m)
+        ~odometry_alpha_4 (:obj:`float`): Odometry noise to account for error
+        in the translation estimate based on the performed rotation. (m/deg)
+        ~laser_range_noise_std (:obj:`float`): Standard deviation of the range readings from the LiDAR.
+        ~initial_pose_x (:obj:`float`): Initial robot pose in `x` direction,
+        used as the mean in initializing the filter by a Gaussian distribution.
+        ~initial_pose_y (:obj:`float`): Initial robot pose in `y` direction,
+        used as the mean in initializing the filter by a Gaussian distribution.
+        ~initial_pose_heading (:obj:`float`): Initial robot heading,
+        used as the mean in initializing the filter by a Gaussian distribution.
+        ~initial_cov_x (:obj:`float`): Initial covariance of `x` position (`x*x`),
+        used as the covariance in initializing the filter by a Gaussian distribution.
+        ~initial_cov_y (:obj:`float`): Initial covariance of `y` position (`y*y`),
+        used as the covariance in initializing the filter by a Gaussian distribution.
+        ~initial_cov_heading (:obj:`float`): Initial covariance of `heading` (`heading*heading`),
+        used as the covariance in initializing the filter by a Gaussian distribution.
+        ~export_data (:obj:`bool`): Export sensor data and filter output. Defaults to false.
+
 
     Subscribers:
-        ~scan (:obj:`sensros_msgs.msg.LaserScan`): Range readings from the LiDAR.
-        ~odom (:obj:`nav_msgs.msg.Odometry`): The odometry of the differential drive robot.
+        ~scan_topic (:obj:`sensros_msgs.msg.LaserScan`): Range readings from the LiDAR. Defaults to `/scan`.
+        ~odom_topic (:obj:`nav_msgs.msg.Odometry`): The odometry of the differential drive robot. Defaults to `/odom`.
 
     Called Services:
-        ~static_map (:obj:`nav_msgs.srv.GetMap`): The static map to be localized on.
+        ~static_map_srv (:obj:`nav_msgs.srv.GetMap`): The static map to be localized on. Defaults to `static_map`.
 
     Required Transforms:
-        ~base_footprint -> ~odom_frame
-        ~scan_frame -> ~base_footprint
+        ~robot_base_frame, defaults to `base_footprint`: -> ~odom_frame, defaults to `odom`.
+        ~scan_frame, defaults to `scan`: -> ~robot_base_frame.
 
-    Provided Transforms:
-        ~map_frame -> ~odom_frame
+    Provided Transform:
+        ~global_frame, defaults to `map`: -> ~odom_frame, defaults to `odom`
 
     """
 
@@ -58,31 +88,63 @@ class DhfLocalizationNode:
         rospy.init_node("dhf_localization_node")
         rospy.loginfo("Localization node created")
 
-        self.tf_broadcaster = tf2_ros.TransformBroadcaster()
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        # Setting up ROS parameters
+        self.scan_topic = rospy.get_param("~scan_topic")
+        self.odom_topic = rospy.get_param("~odom_topic")
+        self.static_map_srv = rospy.get_param("~static_map_srv")
+        self.robot_base_frame = rospy.get_param("~robot_base_frame")
+        self.odom_frame = rospy.get_param("~odom_frame")
+        self.scan_frame = rospy.get_param("~scan_frame")
+        self.global_frame = rospy.get_param("~global_frame")
+        self.transform_tolerance = rospy.get_param("~transform_tolerance")
+        self.detection_tolerance = rospy.get_param("~detection_tolerance")
 
-        self.sub_scan = message_filters.Subscriber("scan", LaserScan)
-        self.sub_odom = message_filters.Subscriber("odom", Odometry)
+        self.particles = rospy.get_param("~particles")
+        self.pseudo_timesteps = rospy.get_param("~pseudo_timesteps")
 
-        self.prev_odom = None
+        self.max_ray_number = rospy.get_param("~max_ray_number")
+        self.laser_range_noise_std = rospy.get_param("~laser_range_noise_std")
+
+        self.odometry_alpha_1 = rospy.get_param("~odometry_alpha_1")
+        self.odometry_alpha_2 = rospy.get_param("~odometry_alpha_2")
+        self.odometry_alpha_3 = rospy.get_param("~odometry_alpha_3")
+        self.odometry_alpha_4 = rospy.get_param("~odometry_alpha_4")
+
+        self.initial_pose_x = rospy.get_param("~initial_pose_x")
+        self.initial_pose_y = rospy.get_param("~initial_pose_y")
+        self.initial_pose_heading = rospy.get_param("~initial_pose_heading")
+        self.initial_cov_x = rospy.get_param("~initial_cov_x")
+        self.initial_cov_y = rospy.get_param("~initial_cov_y")
+        self.initial_cov_heading = rospy.get_param("~initial_cov_heading")
+
+        self.export_data = rospy.get_param("~export_data")
+
+        # Services
+        self.srv_get_map = rospy.ServiceProxy(self.static_map_srv, GetMap)
+
+        # Generic attributes
         self.prior = None
         self.ekf_prior = None
         self.filter_initialized = False
-        self.measurement_processer = None
-
-        self.srv_get_map = rospy.ServiceProxy("static_map", GetMap)
+        self.prev_odom = None
         self.gridmap = None
-        self.gridmap = self.get_map()
-
+        self.gridmap = self.get_map()  # TODO investigate
         self.export_data = True
         if self.export_data:
             self.topicdata = []
 
+        # Subscribers
+        self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
+        self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_scan, self.sub_odom], 100, 0.05
+            [self.sub_scan, self.sub_odom], 100, self.detection_tolerance
         )
         time_sync_sensors.registerCallback(self.cb_scan_odom)
+
+        # Listeners and broadcasters
+        self.tf_broadcaster = tf2_ros.TransformBroadcaster()
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
     def cb_scan_odom(self, scan_msg, odom_msg):
         """Callback to handle the sensor messages.
@@ -107,7 +169,9 @@ class DhfLocalizationNode:
             return
 
         measurement = self.process_scan(scan)
-        measurement = self.measurement_processer.filter_measurements(measurement)
+        measurement = self.measurement_processer.filter_measurements(
+            measurement
+        )  # TODO remove self
 
         control_input = [self.prev_odom, odom]
 
@@ -119,7 +183,7 @@ class DhfLocalizationNode:
 
         map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
         base_to_odom = self.tf_buffer.lookup_transform(
-            "base_footprint", "odom", rospy.Time()
+            self.robot_base_frame, self.odom_frame, rospy.Time()
         )
         base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
         map_to_odom_msg = self.msg_from_transformation_matrix(
@@ -139,7 +203,7 @@ class DhfLocalizationNode:
         """Creates one log entry of the given data. Appends it to the log.
 
         Args:
-            odom (:obj:`list`): Odomerty data: x,y,heading.
+            odom (:obj:`list`): Odometry data: x,y,heading.
             scan (:obj:`list`): List of range measurements.
             filtered_state (:obj:`(3,1) np.ndarray`): Output of the filter: x,y,heading
             timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry.
@@ -215,12 +279,10 @@ class DhfLocalizationNode:
         tran = translation_from_matrix(tr_matrix)
         rot = quaternion_from_matrix(tr_matrix)
 
-        tolerance = 0.1
-
         msg = TransformStamped()
-        msg.header.stamp = rospy.Time(timestamp.to_time() + tolerance)
-        msg.header.frame_id = "map"
-        msg.child_frame_id = "odom"
+        msg.header.stamp = rospy.Time(timestamp.to_time() + self.transform_tolerance)
+        msg.header.frame_id = self.global_frame
+        msg.child_frame_id = self.odom_frame
         msg.transform.translation.x = tran[0]
         msg.transform.translation.y = tran[1]
         msg.transform.translation.z = tran[2]
@@ -236,7 +298,7 @@ class DhfLocalizationNode:
         """Creates a planar pose vector from the odom message.
 
         Args:
-            odom_msg (:obj:`nav_msgs.msg.Odomery`)
+            odom_msg (:obj:`nav_msgs.msg.Odometry`)
 
         Returns:
             :obj:`list` Containing the x,y position in `m` and the yaw angle in `rad`.
@@ -357,7 +419,7 @@ class DhfLocalizationNode:
         max_val = map_array.max()
         return np.where(map_array < max_val, 0, 1)
 
-    def broadcast_pose(self, pose):
+    def broadcast_pose(self, pose):  # TODO remove
         """Broadcast the transormation between the map and the robot.
 
         Uses the `map` frame as a base and the `base_footprint` as the child.
@@ -367,8 +429,8 @@ class DhfLocalizationNode:
         """
         transform = TransformStamped()
         transform.header.stamp = rospy.Time.now()
-        transform.header.frame_id = "map"
-        transform.child_frame_id = "base_footprint"
+        transform.header.frame_id = self.global_frame
+        transform.child_frame_id = self.robot_base_frame
         transform.transform.translation.x = pose[0]
         transform.transform.translation.y = pose[1]
         transform.transform.translation.z = 0.0
@@ -394,51 +456,47 @@ class DhfLocalizationNode:
 
     def init_filter(self):
         """Initializes the filters using the ROS parameter server."""
-        cfg_random_seed = 2021
+        cfg_random_seed = 2021  # TODO: maybe to parameter
         rng = np.random.default_rng(cfg_random_seed)
-        cfg_max_ray_number = 500
-        cfg_odometry_alpha_1 = 0.1
-        cfg_odometry_alpha_2 = 0.1
-        cfg_odometry_alpha_3 = 0.1
-        cfg_odometry_alpha_4 = 0.1
 
         motion_model = OdometryMotionModel(
             [
-                cfg_odometry_alpha_1,
-                cfg_odometry_alpha_2,
-                cfg_odometry_alpha_3,
-                cfg_odometry_alpha_4,
+                self.odometry_alpha_1,
+                self.odometry_alpha_2,
+                self.odometry_alpha_3,
+                self.odometry_alpha_4,
             ],
             rng=rng,
         )
 
-        cfg_measurement_range_noise_std = 0.01
-        measurement_model = MeasurementModel(
-            self.gridmap, cfg_measurement_range_noise_std
-        )
+        measurement_model = MeasurementModel(self.gridmap, self.laser_range_noise_std)
 
-        cfg_edh_particle_number = 1000
-        cfg_edh_lambda_number = 10
-        cfg_init_gaussian_mean = np.array([-3.0, 1.0, 0])
+        cfg_init_gaussian_mean = np.array(
+            [self.initial_pose_x, self.initial_pose_y, self.initial_pose_heading]
+        )
         cfg_init_gaussian_covar = np.array(
-            [[0.1**2, 0, 0], [0, 0.1**2, 0], [0, 0, 0.05**2]]
+            [
+                [self.initial_cov_x, 0, 0],
+                [0, self.initial_cov_y, 0],
+                [0, 0, self.initial_cov_heading],
+            ]
         )
 
         self.measurement_processer = MeasurementProcessor(
-            max_ray_number=cfg_max_ray_number
+            max_ray_number=self.max_ray_number
         )
         self.ekf = EKF(motion_model, measurement_model)
         self.edh = EDH(
             motion_model=motion_model,
             measurement_model=measurement_model,
-            particle_num=cfg_edh_particle_number,
-            lambda_num=cfg_edh_lambda_number,
+            particle_num=self.particles,
+            lambda_num=self.pseudo_timesteps,
         )
 
         self.prior = ParticleState.init_from_gaussian(
             cfg_init_gaussian_mean,
             cfg_init_gaussian_covar,
-            cfg_edh_particle_number,
+            self.particles,
             rng=rng,
         )
         self.ekf_prior = StateHypothesis(

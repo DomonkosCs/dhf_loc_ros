@@ -1,10 +1,12 @@
 <launch>
     <!-- <arg name="param_file_name" default="default" doc="Specify a param file. ex:megaman" /> -->
-    <arg name="pkg_name" default="dhf_loc" doc="name of the package" />
-    <arg name="node_name" default="dhf_localization_node" doc="name of the node" />
+    <arg name="pkg_name" default="dhf_loc" doc="Name of the package" />
+    <arg name="node_name" default="dhf_localization_node" doc="Name of the node" />
+    <arg name="param_file_name" default="default" doc="Parameter file name" />
+
 
     <node pkg="$(arg pkg_name)" type="$(arg node_name).py" name="$(arg node_name)" output="screen">
-        <!-- <rosparam command="load" file="$(find lane_control)/config/$(arg node_name)/$(arg param_file_name).yaml" /> -->
+        <rosparam command="load" file="$(find dhf_loc)/config/$(arg node_name)/$(arg param_file_name).yaml" />
     </node>
 
 </launch>
