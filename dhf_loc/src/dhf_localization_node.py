@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
 import json
+import time
 
 import rospy
 import message_filters
@@ -36,14 +37,18 @@ class DhfLocalizationNode:
     a chamfer distance based method as measurement model (developed by Dantanarayana and Ranasinghe),
     and the odometry motion model (developed by Thrun et al.).
 
-    Configuration:
-        ~particles (:obj:`int`): Number of particles to be used in the particle flow filter.
-        ~pseudo_timesteps (:obj:`int`): Number of equal homotopy steps to perform the filter update.
+    Configuration: #TODO add defaults
         ~transform_tolerance (:obj:`float`): Time in seconds to post-date the `~map_frame` -> `odom_frame` transformation.
         ~detection_tolerance (:obj:`float`): Tolerance in seconds between the `LaserScan` and the `Odometry` message
         to be associated together.
+
+        ~particles (:obj:`int`): Number of particles to be used in the particle flow filter.
+        ~pseudo_timesteps (:obj:`int`): Number of equal homotopy steps to perform the filter update.
+
         ~max_ray_number (:obj:`int`): Max number of laser rays to be used. Unused rays are eliminated
         evenly.
+        ~laser_range_noise_std (:obj:`float`): Standard deviation of the range readings from the LiDAR.
+
         ~odometry_alpha_1 (:obj:`float`): Odometry noise to account for error
         in the rotation estimate based on the performed rotation. (deg/deg)
         ~odometry_alpha_2 (:obj:`float`): Odometry noise to account for error
@@ -52,7 +57,7 @@ class DhfLocalizationNode:
         in the translation estimate based on the performed translation. (m/m)
         ~odometry_alpha_4 (:obj:`float`): Odometry noise to account for error
         in the translation estimate based on the performed rotation. (m/deg)
-        ~laser_range_noise_std (:obj:`float`): Standard deviation of the range readings from the LiDAR.
+
         ~initial_pose_x (:obj:`float`): Initial robot pose in `x` direction,
         used as the mean in initializing the filter by a Gaussian distribution.
         ~initial_pose_y (:obj:`float`): Initial robot pose in `y` direction,
@@ -65,6 +70,7 @@ class DhfLocalizationNode:
         used as the covariance in initializing the filter by a Gaussian distribution.
         ~initial_cov_heading (:obj:`float`): Initial covariance of `heading` (`heading*heading`),
         used as the covariance in initializing the filter by a Gaussian distribution.
+
         ~export_data (:obj:`bool`): Export sensor data and filter output. Defaults to false.
 
 
@@ -119,16 +125,12 @@ class DhfLocalizationNode:
 
         self.export_data = rospy.get_param("~export_data")
 
-        # Services
-        self.srv_get_map = rospy.ServiceProxy(self.static_map_srv, GetMap)
-
         # Generic attributes
         self.prior = None
         self.ekf_prior = None
         self.filter_initialized = False
         self.prev_odom = None
         self.gridmap = None
-        self.gridmap = self.get_map()  # TODO investigate
         self.export_data = True
         if self.export_data:
             self.topicdata = []
@@ -146,6 +148,16 @@ class DhfLocalizationNode:
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
+        # Timer
+        self.last_print_time = 0
+        self.last_detection_since_epoch = None
+        self.print_delay = 5  # seconds
+        self.timer = rospy.Timer(rospy.Duration(0.1), self.cb_waiting_timer)
+
+        # Services
+        self.srv_get_map = rospy.ServiceProxy(self.static_map_srv, GetMap)
+        self.gridmap = self.get_map()  # blocks
+
     def cb_scan_odom(self, scan_msg, odom_msg):
         """Callback to handle the sensor messages.
 
@@ -155,16 +167,19 @@ class DhfLocalizationNode:
             scan_msg (:obj:`sensor_msgs.msg.LaserScan`): Laser scan from LiDAR.
             odom_msg (:obj:`nav_msgs.msg.Odometry`): Odom message from the wheel encoders.
         """
+        self.last_detection_since_epoch = (
+            time.time()
+        )  # not simulated time, used for timeout detection
+
         if self.gridmap is None:
-            rospy.loginfo("Waiting for map.")
             return
 
+        detection_timestamp = scan_msg.header.stamp.to_sec()  # almost the same as odom
         odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
-        detection_timestamp = scan_msg.header.stamp  # almost the same as odom
 
         if not self.filter_initialized:
-            self.handle_first_detection(odom, detection_timestamp.to_sec())
+            self.handle_first_detection(odom, detection_timestamp)
             self.filter_initialized = True
             return
 
@@ -199,18 +214,49 @@ class DhfLocalizationNode:
         if self.export_data:
             self.log_data(odom, scan, particle_mean, detection_timestamp)
 
+    def cb_waiting_timer(self, _):
+        """Callback to periodically check for missing messages and services.
+
+        Based on https://github.com/duckietown/dt-core/blob/daffy/packages/deadreckoning/src/deadreckoning_node.py
+        """
+
+        need_print = time.time() - self.last_print_time > self.print_delay
+
+        if self.last_detection_since_epoch is not None:
+            dt = rospy.get_time() - self.last_detection_since_epoch
+            if dt > self.print_delay and need_print:
+                rospy.logwarn(
+                    "Associated scan and odom message is not received for {} s".format(
+                        dt
+                    )
+                )
+        elif self.last_detection_since_epoch is None and need_print:
+            rospy.logwarn(
+                "No associated scan and odom message is received. Listening on '{}', '{}'. Association tolerance: {} s.".format(
+                    self.scan_topic, self.odom_topic, self.transform_tolerance
+                )
+            )
+
+        if self.gridmap is None and need_print:
+            rospy.logwarn(
+                "Waiting for map service. Listening on '{}'".format(self.static_map_srv)
+            )
+
+        if need_print:
+            self.last_print_time = time.time()
+
     def log_data(self, odom, scan, filtered_state, timestamp):
         """Creates one log entry of the given data. Appends it to the log.
 
         Args:
             odom (:obj:`list`): Odometry data: x,y,heading.
             scan (:obj:`list`): List of range measurements.
-            filtered_state (:obj:`(3,1) np.ndarray`): Output of the filter: x,y,heading
-            timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry.
+            filtered_state (:obj:`(3,1) np.ndarray`): Output of the filter: x,y,heading.
+            timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry in secs.
         """
         self.topicdata.append(
             {
-                "t": timestamp.to_sec(),
+                "t": timestamp,
                 "pose": [
                     round(odom[0], 3),
                     round(odom[1], 3),
@@ -271,7 +317,7 @@ class DhfLocalizationNode:
 
         Args:
             tr_matrix (:obj:`(4,4) np.ndarray`): Homogeneous transformation matrix.
-            stamp (:obj:`genpy.rostime.Time`): Timestamp of the message.
+            stamp (:obj:`genpy.rostime.Time`): Timestamp of the message in secs.
 
         Returns:
             :obj:`geometry_msgs.msg.TransformStamped`: Transform message.
@@ -280,7 +326,7 @@ class DhfLocalizationNode:
         rot = quaternion_from_matrix(tr_matrix)
 
         msg = TransformStamped()
-        msg.header.stamp = rospy.Time(timestamp.to_time() + self.transform_tolerance)
+        msg.header.stamp = rospy.Time(timestamp + self.transform_tolerance)
         msg.header.frame_id = self.global_frame
         msg.child_frame_id = self.odom_frame
         msg.transform.translation.x = tran[0]
@@ -359,7 +405,7 @@ class DhfLocalizationNode:
     def get_map_from_srv(self):
         """Requests the occupancy grid map.
 
-        Calls the service `static_map` from the `map_server` node which returns a request (:obj:`nav_msgs.srv.GetMap`)
+        Calls the service `static_map` from the `map_server` node which returns a request (:obj:`nav_msgs.srv.GetMap`).
 
         Returns:
             :obj:`nav_msgs.srv.GetMap`: The message for successful srv. call,
