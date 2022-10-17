@@ -32,7 +32,7 @@ from dhflocalization.customtypes import ParticleState, StateHypothesis
 class DhfLocalizationNode:
     def __init__(self) -> None:
         rospy.init_node("dhf_localization_node")
-        rospy.loginfo("Node created")
+        rospy.loginfo("Localization node created")
 
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
         self.tf_buffer = tf2_ros.Buffer()
@@ -41,7 +41,6 @@ class DhfLocalizationNode:
         self.sub_scan = message_filters.Subscriber("scan", LaserScan)
         self.sub_odom = message_filters.Subscriber("odom", Odometry)
 
-        self.gridmap = None
         self.prev_odom = None
         self.prior = None
         self.ekf_prior = None
@@ -49,6 +48,7 @@ class DhfLocalizationNode:
         self.measurement_processer = None
 
         self.srv_get_map = rospy.ServiceProxy("static_map", GetMap)
+        self.gridmap = None
         self.gridmap = self.get_map()
 
         self.export_data = False
@@ -73,24 +73,15 @@ class DhfLocalizationNode:
             rospy.loginfo("Waiting for map.")
             return
 
-        if not self.filter_initialized:
-            self.init_filter()
-            self.filter_initialized = True
-
         odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
+        detection_timestamp = scan_msg.header.stamp  # almost the same as odom
 
-        scan_timestamp = scan_msg.header.stamp
-
-        if self.prev_odom is None:
-            rospy.loginfo(
-                "I am initializing at {}s".format(scan_msg.header.stamp.to_sec())
-            )
-            self.prev_odom = odom
-            rospy.loginfo("Ignoring first detection.")
+        if not self.filter_initialized:
+            self.handle_first_detection(odom, detection_timestamp.to_sec())
+            self.filter_initialized = True
             return
 
-        rospy.loginfo("I am running at {}s".format(scan_msg.header.stamp.to_sec()))
         measurement = self.process_scan(scan)
         measurement = self.measurement_processer.filter_measurements(measurement)
 
@@ -108,7 +99,7 @@ class DhfLocalizationNode:
         )
         base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
         map_to_odom_msg = self.msg_from_transformation_matrix(
-            map_to_base_tr @ base_to_odom_tr, scan_timestamp
+            map_to_base_tr @ base_to_odom_tr, detection_timestamp
         )
         self.tf_broadcaster.sendTransform(map_to_odom_msg)
 
@@ -118,7 +109,7 @@ class DhfLocalizationNode:
         self.prev_odom = odom
 
         if self.export_data:
-            self.log_data(scan_timestamp, odom, particle_mean, scan)
+            self.log_data(detection_timestamp, odom, particle_mean, scan)
 
     def log_data(self, timestamp, odom, filtered_state, scan):
         self.topicdata.append(
@@ -329,6 +320,11 @@ class DhfLocalizationNode:
         transform.transform.rotation.w = quat[3]
 
         self.tf_broadcaster.sendTransform(transform)
+
+    def handle_first_detection(self, odom, timestamp):
+        self.init_filter()
+        rospy.loginfo("I am initializing at {}s".format(timestamp))
+        self.prev_odom = odom
 
     def init_filter(self):
         cfg_random_seed = 2021
