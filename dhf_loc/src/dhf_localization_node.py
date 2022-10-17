@@ -497,7 +497,7 @@ class DhfLocalizationNode:
             timestamp (:obj:`float`): Timestamp of the init in seconds.
         """
         self.init_filter()
-        rospy.loginfo("I am initializing at {}s".format(timestamp))
+        rospy.loginfo("Filter is initialized at {}s".format(timestamp))
         self.prev_odom = odom
 
     def init_filter(self):
