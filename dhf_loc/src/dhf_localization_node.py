@@ -286,6 +286,7 @@ class DhfLocalizationNode:
         return transformation_matrix
 
     def transformation_matrix_from_msg(self, msg):
+
         """Creates a homogeneous transformation matrix from a message.
 
         Args:
@@ -500,6 +501,38 @@ class DhfLocalizationNode:
         rospy.loginfo("Filter is initialized at {}s".format(timestamp))
         self.prev_odom = odom
 
+    def get_robot_sensor_transform(self):
+        """Determines the static transform between the robot and the sensor.
+
+        Only works in 2D, and only handles a statically mounted sensor.
+
+        Returns:
+            :obj:`tuple` of :obj:`float`: Translation in x, translation in y, and yaw angle
+        """
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.robot_base_frame, self.scan_frame, rospy.Time()
+            )
+            translation = transform.transform.translation
+            rotation_quat = transform.transform.rotation
+            rotation_euler = euler_from_quaternion(
+                (rotation_quat.x, rotation_quat.y, rotation_quat.z, rotation_quat.w)
+            )
+            return translation.x, translation.y, rotation_euler[2]
+
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as err:
+            rospy.logwarn(err)
+            rospy.logwarn(
+                "Cannot determine the transform between '{}' and '{}', using default values instead".format(
+                    self.robot_base_frame, self.scan_frame
+                )
+            )
+            return 0, 0, 0
+
     def init_filter(self):
         """Initializes the filters using the ROS parameter server."""
         cfg_random_seed = 2021  # TODO: maybe to parameter
@@ -515,7 +548,18 @@ class DhfLocalizationNode:
             rng=rng,
         )
 
-        measurement_model = MeasurementModel(self.gridmap, self.laser_range_noise_std)
+        (
+            robot_sensor_dx,
+            robot_sensor_dy,
+            robot_sensor_dyaw,
+        ) = self.get_robot_sensor_transform()
+        measurement_model = MeasurementModel(
+            self.gridmap,
+            self.laser_range_noise_std,
+            robot_sensor_dx,
+            robot_sensor_dy,
+            robot_sensor_dyaw,
+        )
 
         cfg_init_gaussian_mean = np.array(
             [self.initial_pose_x, self.initial_pose_y, self.initial_pose_heading]
