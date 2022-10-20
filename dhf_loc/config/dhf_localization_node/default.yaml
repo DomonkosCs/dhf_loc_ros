@@ -8,7 +8,7 @@ odom_topic: "/odom"
 static_map_srv: "static_map"
 robot_base_frame: "base_footprint"
 odom_frame: "odom"
-scan_frame: "scan"
+scan_frame: "base_scan"
 global_frame: "map"
 transform_tolerance: 0.1
 detection_tolerance: 0.05
