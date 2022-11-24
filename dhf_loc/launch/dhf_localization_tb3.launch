@@ -4,7 +4,7 @@
 
     <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch">
         <arg name="sensor_update_rate" value="10" />
-        <arg name="encoder_noise_factor" value="0.0001" />
+        <arg name="encoder_noise_factor" value="0.01" />
     </include>
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
