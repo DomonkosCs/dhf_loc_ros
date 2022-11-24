@@ -123,6 +123,8 @@ class DhfLocalizationNode:
         self.initial_cov_y = rospy.get_param("~initial_cov_y")
         self.initial_cov_heading = rospy.get_param("~initial_cov_heading")
 
+        self.translation_threshold = rospy.get_param("~translation_threshold")
+        self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
         # Generic attributes
@@ -178,17 +180,23 @@ class DhfLocalizationNode:
         odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
 
+        if self.prev_odom is None:
+            self.prev_odom = odom
+            return
+
         if not self.filter_initialized:
-            self.handle_first_detection(odom, detection_timestamp)
-            self.filter_initialized = True
+            self.init_filter()
+            # self.handle_first_detection(odom, detection_timestamp)
+
+        control_input = [self.prev_odom, odom]
+        if not self.check_update_required(control_input) and self.filter_initialized:
+            rospy.loginfo("Filter update is not required")
             return
 
         measurement = self.process_scan(scan)
         measurement = self.measurement_processer.filter_measurements(
             measurement
         )  # TODO remove self
-
-        control_input = [self.prev_odom, odom]
 
         prediction = self.edh.propagate(self.prior, control_input)
         ekf_prediction = self.ekf.propagate(self.ekf_prior, control_input)
@@ -205,10 +213,11 @@ class DhfLocalizationNode:
             map_to_base_tr @ base_to_odom_tr, detection_timestamp
         )
         self.tf_broadcaster.sendTransform(map_to_odom_msg)
+        if not self.filter_initialized:
+            self.filter_initialized = True
 
         self.prior = posterior
         self.ekf_prior = ekf_posterior
-
         self.prev_odom = odom
 
         if self.export_data:
@@ -244,6 +253,18 @@ class DhfLocalizationNode:
 
         if need_print:
             self.last_print_time = time.time()
+
+    def check_update_required(self, control_input):
+        diff = np.abs(np.asarray(control_input[0]) - np.asarray(control_input[1]))
+        diff_x = diff[0]
+        diff_y = diff[1]
+        diff_yaw = diff[2]
+
+        return (
+            diff_x > self.translation_threshold
+            or diff_y > self.translation_threshold
+            or diff_yaw > self.rotation_threshold
+        )
 
     def log_data(self, odom, scan, filtered_state, timestamp):
         """Creates one log entry of the given data. Appends it to the log.
