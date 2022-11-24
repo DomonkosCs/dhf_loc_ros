@@ -9,7 +9,9 @@
     <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_description.launch" />
 
     <group if="$(arg no_amcl)">
-        <include file="$(find dhf_loc)/launch/dhf_localization_node.launch" />
+        <include file="$(find dhf_loc)/launch/dhf_localization_node.launch">
+            <arg name="param_file_name" value="simu" />
+        </include>
     </group>
 
     <node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find dhf_loc)/rviz/default.rviz" />

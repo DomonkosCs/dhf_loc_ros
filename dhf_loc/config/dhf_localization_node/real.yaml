@@ -10,7 +10,7 @@ robot_base_frame: "base_footprint"
 odom_frame: "odom"
 scan_frame: "base_scan"
 global_frame: "map"
-transform_tolerance: 0.1
+transform_tolerance: 0.5
 detection_tolerance: 0.05
 
 # Filter-specific
@@ -19,7 +19,7 @@ pseudo_timesteps: 10
 
 # Measurement model
 max_ray_number: 500
-laser_range_noise_std: 0.01
+laser_range_noise_std: 0.1
 
 # Motion model
 odometry_alpha_1: 0.1
