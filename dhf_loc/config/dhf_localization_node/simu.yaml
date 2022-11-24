@@ -1,4 +1,4 @@
-# Default parameters for the dhf_localization_node.
+# Parameters for the simulational runs.
 # For the documentation of the parameters, see
 # `dhf_localization_node.py`.
 
@@ -28,8 +28,8 @@ odometry_alpha_3: 0.1
 odometry_alpha_4: 0.1
 
 # Initialization
-initial_pose_x: 0
-initial_pose_y: 0
+initial_pose_x: -3.0
+initial_pose_y: 1.0
 initial_pose_heading: 0 
 initial_cov_x: 0.01
 initial_cov_y: 0.01
