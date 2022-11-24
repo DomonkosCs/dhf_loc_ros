@@ -169,6 +169,10 @@ class DhfLocalizationNode:
             scan_msg (:obj:`sensor_msgs.msg.LaserScan`): Laser scan from LiDAR.
             odom_msg (:obj:`nav_msgs.msg.Odometry`): Odom message from the wheel encoders.
         """
+        comp_time_start = rospy.get_time()
+
+        if self.last_detection_since_epoch is not None:
+            rospy.loginfo(time.time() - self.last_detection_since_epoch)
         self.last_detection_since_epoch = (
             time.time()
         )  # not simulated time, used for timeout detection
@@ -212,6 +216,13 @@ class DhfLocalizationNode:
         map_to_odom_msg = self.msg_from_transformation_matrix(
             map_to_base_tr @ base_to_odom_tr, detection_timestamp
         )
+
+        comp_time_end = rospy.get_time()
+        comp_time_delta = comp_time_end - comp_time_start
+
+        if comp_time_delta > 0.2:  # TODO: extract laser scan hz and use that here
+            rospy.logwarn("Computation time exceeds the data frequency")
+
         self.tf_broadcaster.sendTransform(map_to_odom_msg)
         if not self.filter_initialized:
             self.filter_initialized = True
