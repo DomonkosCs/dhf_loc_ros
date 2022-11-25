@@ -190,7 +190,6 @@ class DhfLocalizationNode:
 
         if not self.filter_initialized:
             self.init_filter()
-            # self.handle_first_detection(odom, detection_timestamp)
 
         control_input = [self.prev_odom, odom]
         if not self.check_update_required(control_input) and self.filter_initialized:
@@ -521,17 +520,6 @@ class DhfLocalizationNode:
         transform.transform.rotation.w = quat[3]
 
         self.tf_broadcaster.sendTransform(transform)
-
-    def handle_first_detection(self, odom, timestamp):
-        """Initializes filter and handles first odometry message.
-
-        Args:
-            odom (:obj:`list`): List, containing the odometry.
-            timestamp (:obj:`float`): Timestamp of the init in seconds.
-        """
-        self.init_filter()
-        rospy.loginfo("Filter is initialized at {}s".format(timestamp))
-        self.prev_odom = odom
 
     def get_robot_sensor_transform(self):
         """Determines the static transform between the robot and the sensor.
