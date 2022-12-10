@@ -2,8 +2,10 @@
 import rospy
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-import json
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from naoqi_bridge_msgs.msg import FloatStamped
 import rospkg
+import json
 import message_filters
 from tf.transformations import (
     euler_from_quaternion,
@@ -15,20 +17,40 @@ class TopicExporterNode:
         rospy.init_node("topicexporter_node")
         rospy.loginfo("Topic exporter node created")
 
-        self.scan_topic = rospy.get_param("~scan_topic")
-        self.odom_topic = rospy.get_param("~odom_topic")
         self.pkg_name = rospy.get_param("~pkg_name")
-        self.bag_name = rospy.get_param("~bag")
+        self.export_file_name = rospy.get_param("~export_file_name")
+        self.amcl_topic = rospy.get_param("~amcl_topic", "")
+        self.amcl_comptime_topic = rospy.get_param("~amcl_comptime_topic", "")
         self.detection_tolerance = rospy.get_param("~detection_tolerance")
 
-        self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
-        self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
-        time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_scan, self.sub_odom], 100, self.detection_tolerance
-        )
-        time_sync_sensors.registerCallback(self.cb_scan_odom)
+        if self.amcl_topic == "":
 
-        self.prev_odom = None
+            self.scan_topic = rospy.get_param("~scan_topic")
+            self.odom_topic = rospy.get_param("~odom_topic")
+            self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
+            self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
+            time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
+                [self.sub_scan, self.sub_odom], 100, self.detection_tolerance
+            )
+            time_sync_sensors.registerCallback(self.cb_scan_odom)
+
+            self.prev_odom = None
+
+        else:
+            self.sub_amcl = message_filters.Subscriber(
+                self.amcl_topic, PoseWithCovarianceStamped
+            )
+            self.sub_amcl_comptime = message_filters.Subscriber(
+                self.amcl_comptime_topic, FloatStamped
+            )
+            amcl_sync = message_filters.ApproximateTimeSynchronizer(
+                [self.sub_amcl, self.sub_amcl_comptime],
+                100,
+                self.detection_tolerance,
+                allow_headerless=True,
+            )
+            amcl_sync.registerCallback(self.cb_amcl)
+
         self.topicdata = []
 
     def cb_scan_odom(self, scan_msg, odom_msg):
@@ -41,6 +63,13 @@ class TopicExporterNode:
             return
 
         self.log_data(odom, scan, detection_timestamp)
+
+    def cb_amcl(self, amcl_msg, comptime_msg):
+        detection_timestamp = amcl_msg.header.stamp.to_sec()
+        comptime = comptime_msg.data
+        amcl = self.extract_odom_msg(amcl_msg)
+
+        self.log_data_amcl(amcl, comptime, detection_timestamp)
 
     def log_data(self, odom, scan, timestamp):
         """Creates one log entry of the given data. Appends it to the log.
@@ -59,6 +88,19 @@ class TopicExporterNode:
                     round(odom[2], 3),
                 ],
                 "scan": scan,
+            }
+        )
+
+    def log_data_amcl(self, pose, comptime, timestamp):
+        self.topicdata.append(
+            {
+                "t": timestamp,
+                "amcl": [
+                    round(pose[0], 3),
+                    round(pose[1], 3),
+                    round(pose[2], 3),
+                ],
+                "comptime": comptime,
             }
         )
 
@@ -113,7 +155,7 @@ def save_data(data, filename="topicexport"):
 
     Args:
         data (:obj:`dict`): Data to be exported.
-        filename (:obj:`str`, optional): Name of the file with extension. Defaults to "topicexport.json".
+        filename (:obj:`str`, optional): Name of the file without extension. Defaults to "topicexport".
     """
 
     # get an instance of RosPack with the default search paths
@@ -128,4 +170,8 @@ if __name__ == "__main__":
     topicexporter_node = TopicExporterNode()
     rospy.spin()
 
-    rospy.on_shutdown(lambda: save_data(topicexporter_node.topicdata, topicexporter_node.bag_name))
+    rospy.on_shutdown(
+        lambda: save_data(
+            topicexporter_node.topicdata, topicexporter_node.export_file_name
+        )
+    )
