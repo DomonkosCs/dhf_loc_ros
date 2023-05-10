@@ -27,12 +27,14 @@ class TopicExporterNode:
 
             self.scan_topic = rospy.get_param("~scan_topic")
             self.odom_topic = rospy.get_param("~odom_topic")
+            self.truth_topic = rospy.get_param("~truth_topic")
             self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
             self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
+            self.sub_truth = message_filters.Subscriber(self.truth_topic, Odometry)
             time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-                [self.sub_scan, self.sub_odom], 100, self.detection_tolerance
+                [self.sub_scan, self.sub_odom, self.sub_truth], 100, self.detection_tolerance
             )
-            time_sync_sensors.registerCallback(self.cb_scan_odom)
+            time_sync_sensors.registerCallback(self.cb_scan_odom_truth)
 
             self.prev_odom = None
 
@@ -53,16 +55,17 @@ class TopicExporterNode:
 
         self.topicdata = []
 
-    def cb_scan_odom(self, scan_msg, odom_msg):
+    def cb_scan_odom_truth(self, scan_msg, odom_msg, truth_msg):
         detection_timestamp = scan_msg.header.stamp.to_sec()  # almost the same as odom
-        odom = self.extract_odom_msg(odom_msg)
         scan = self.extract_scan_msg(scan_msg)
+        odom = self.extract_odom_msg(odom_msg)
+        truth = self.extract_odom_msg(truth_msg)
 
         if self.prev_odom is None:
             self.prev_odom = odom
             return
 
-        self.log_data(odom, scan, detection_timestamp)
+        self.log_data(scan, odom, truth, detection_timestamp)
 
     def cb_amcl(self, amcl_msg, comptime_msg):
         detection_timestamp = amcl_msg.header.stamp.to_sec()
@@ -71,23 +74,25 @@ class TopicExporterNode:
 
         self.log_data_amcl(amcl, comptime, detection_timestamp)
 
-    def log_data(self, odom, scan, timestamp):
+    def log_data(self, scan, odom, truth, timestamp):
         """Creates one log entry of the given data. Appends it to the log.
 
         Args:
-            odom (:obj:`list`): Odometry data: x,y,heading.
             scan (:obj:`list`): List of range measurements.
+            odom (:obj:`list`): Odometry data: x,y,heading.
+            truth (:obj:`list`): Ground truth pose data: x,y,heading.
             timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry in secs.
         """
         self.topicdata.append(
             {
                 "t": timestamp,
-                "pose": [
+                "odom": [
                     round(odom[0], 3),
                     round(odom[1], 3),
                     round(odom[2], 3),
                 ],
                 "scan": scan,
+                "truth": truth
             }
         )
 
