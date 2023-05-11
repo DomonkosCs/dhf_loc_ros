@@ -4,6 +4,7 @@ import json
 import time
 
 import rospy
+import rospkg
 import message_filters
 import tf2_ros  # TODO replace with tf_conversions, see tf2 tutorial
 from tf.transformations import (
@@ -18,14 +19,16 @@ from tf.transformations import (
 
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
+from dhflocalization.filters.updaters import MEDHUpdater
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
-from dhflocalization.customtypes import ParticleState, StateHypothesis
+from dhflocalization.customtypes import StateHypothesis, Track
 
 from nav_msgs.srv import GetMap
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from geometry_msgs.msg import TransformStamped
+from naoqi_bridge_msgs.msg import FloatStamped
 
 
 class DhfLocalizationNode:
@@ -105,8 +108,8 @@ class DhfLocalizationNode:
         self.transform_tolerance = rospy.get_param("~transform_tolerance")
         self.detection_tolerance = rospy.get_param("~detection_tolerance")
 
-        self.particles = rospy.get_param("~particles")
-        self.pseudo_timesteps = rospy.get_param("~pseudo_timesteps")
+        self.medh_particle_number = rospy.get_param("~particles")
+        self.medh_lambda_number = rospy.get_param("~pseudo_timesteps")
 
         self.max_ray_number = rospy.get_param("~max_ray_number")
         self.laser_range_noise_std = rospy.get_param("~laser_range_noise_std")
@@ -128,22 +131,32 @@ class DhfLocalizationNode:
         self.export_data = rospy.get_param("~export_data")
 
         # Generic attributes
-        self.prior = None
         self.ekf_prior = None
         self.filter_initialized = False
         self.prev_odom = None
         self.gridmap = None
-        self.export_data = True
+        self.motion_model = None
+        self.last_comptime = None
+        self.current_ground_truth = None
         if self.export_data:
             self.topicdata = []
 
         # Subscribers
         self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
         self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
+        self.sub_truth = message_filters.Subscriber(
+            "/ground_truth/state", Odometry
+        )  # TODO
+
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_scan, self.sub_odom], 100, self.detection_tolerance
+            [self.sub_scan, self.sub_odom, self.sub_truth],
+            100,
+            self.detection_tolerance,
         )
         time_sync_sensors.registerCallback(self.cb_scan_odom)
+
+        # Publishers
+        self.pub_comptime = rospy.Publisher("/comptime", FloatStamped, queue_size=10)
 
         # Listeners and broadcasters
         self.tf_broadcaster = tf2_ros.TransformBroadcaster()
@@ -160,7 +173,7 @@ class DhfLocalizationNode:
         self.srv_get_map = rospy.ServiceProxy(self.static_map_srv, GetMap)
         self.gridmap = self.get_map()  # blocks
 
-    def cb_scan_odom(self, scan_msg, odom_msg):
+    def cb_scan_odom(self, scan_msg, odom_msg, truth_msg):
         """Callback to handle the sensor messages.
 
         This is only called if the two sensor messages are sufficiently close in time.
@@ -169,7 +182,6 @@ class DhfLocalizationNode:
             scan_msg (:obj:`sensor_msgs.msg.LaserScan`): Laser scan from LiDAR.
             odom_msg (:obj:`nav_msgs.msg.Odometry`): Odom message from the wheel encoders.
         """
-        comp_time_start = rospy.get_time()
 
         if self.last_detection_since_epoch is not None:
             rospy.loginfo(time.time() - self.last_detection_since_epoch)
@@ -182,6 +194,7 @@ class DhfLocalizationNode:
 
         detection_timestamp = scan_msg.header.stamp.to_sec()  # almost the same as odom
         odom = self.extract_odom_msg(odom_msg)
+        truth = self.extract_odom_msg(truth_msg)
         scan = self.extract_scan_msg(scan_msg)
 
         if self.prev_odom is None:
@@ -196,42 +209,51 @@ class DhfLocalizationNode:
             rospy.loginfo("Filter update is not required")
             return
 
+        comptime_start = time.time()
         measurement = self.process_scan(scan)
-        measurement = self.measurement_processer.filter_measurements(
-            measurement
-        )  # TODO remove self
+        measurement = self.measurement_processer.filter_measurements(measurement)
 
-        prediction = self.edh.propagate(self.prior, control_input)
-        ekf_prediction = self.ekf.propagate(self.ekf_prior, control_input)
-        posterior = self.edh.update(prediction, ekf_prediction, measurement)
-        ekf_posterior = self.ekf.update(ekf_prediction, measurement)
-        particle_mean = posterior.mean()
+        ekf_prediction = self.motion_model.propagate(self.ekf_prior, control_input)
 
-        map_to_base_tr = self.transformation_matrix_from_state(particle_mean)
-        base_to_odom = self.tf_buffer.lookup_transform(
-            self.robot_base_frame, self.odom_frame, rospy.Time()
-        )
-        base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
-        map_to_odom_msg = self.msg_from_transformation_matrix(
-            map_to_base_tr @ base_to_odom_tr, detection_timestamp
-        )
+        for filter in [self.medh]:
+            prior = filter.last_particle_posterior
+            prediction = self.motion_model.propagate_particles(prior, control_input)
 
-        comp_time_end = rospy.get_time()
-        comp_time_delta = comp_time_end - comp_time_start
+            prediction_covar = ekf_prediction.covar
+            posterior = filter.update(
+                prediction, prediction_covar, measurement, return_posterior=True
+            )
 
-        if comp_time_delta > 0.2:  # TODO: extract laser scan hz and use that here
-            rospy.logwarn("Computation time exceeds the data frequency")
+            map_to_base_tr = self.transformation_matrix_from_state(posterior.mean())
+            base_to_odom = self.tf_buffer.lookup_transform(
+                self.robot_base_frame, self.odom_frame, rospy.Time()
+            )
+            base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
+            map_to_odom_msg = self.msg_from_transformation_matrix(
+                map_to_base_tr @ base_to_odom_tr, detection_timestamp
+            )
 
-        self.tf_broadcaster.sendTransform(map_to_odom_msg)
-        if not self.filter_initialized:
-            self.filter_initialized = True
+            self.tf_broadcaster.sendTransform(map_to_odom_msg)
 
-        self.prior = posterior
+            if not self.filter_initialized:
+                self.filter_initialized = True
+
+        ekf_posterior, _ = self.ekf.update(ekf_prediction, measurement)
+        self.ekf_track.append(ekf_posterior)
         self.ekf_prior = ekf_posterior
         self.prev_odom = odom
+        comptime_end = time.time()
+
+        comptime = (comptime_end - comptime_start) * 1e3  # in ms
+        comptime_msg = FloatStamped()
+        comptime_msg.header.stamp = rospy.Time.now()
+        comptime_msg.data = comptime
+
+        self.last_comptime = comptime
+        self.pub_comptime.publish(comptime_msg)
 
         if self.export_data:
-            self.log_data(odom, scan, particle_mean, detection_timestamp)
+            self.log_data(truth, posterior.mean(), comptime, detection_timestamp)
 
     def cb_waiting_timer(self, _):
         """Callback to periodically check for missing messages and services.
@@ -276,29 +298,13 @@ class DhfLocalizationNode:
             or diff_yaw > self.rotation_threshold
         )
 
-    def log_data(self, odom, scan, filtered_state, timestamp):
-        """Creates one log entry of the given data. Appends it to the log.
-
-        Args:
-            odom (:obj:`list`): Odometry data: x,y,heading.
-            scan (:obj:`list`): List of range measurements.
-            filtered_state (:obj:`(3,1) np.ndarray`): Output of the filter: x,y,heading.
-            timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry in secs.
-        """
+    def log_data(self, truth, pose, comptime, timestamp):
         self.topicdata.append(
             {
                 "t": timestamp,
-                "pose": [
-                    round(odom[0], 3),
-                    round(odom[1], 3),
-                    round(odom[2], 3),
-                ],
-                "truth": [
-                    round(filtered_state[0], 3),
-                    round(filtered_state[1], 3),
-                    round(filtered_state[2], 3),
-                ],
-                "scan": scan,
+                "truth": truth,
+                "pose": [pose[0], pose[1], pose[2]],
+                "comptime": comptime,
             }
         )
 
@@ -317,7 +323,6 @@ class DhfLocalizationNode:
         return transformation_matrix
 
     def transformation_matrix_from_msg(self, msg):
-
         """Creates a homogeneous transformation matrix from a message.
 
         Args:
@@ -470,10 +475,10 @@ class DhfLocalizationNode:
         map_array = map_data.reshape(height, width)
         map_array = self.convert_occupancy_representation(map_array)
 
-        center_x = 10  # TODO
-        center_y = 10.05  # TODO
+        center_x = -10  # TODO
+        center_y = -10  # TODO
 
-        occupancy_grid_map = GridMap.load_grid_map_from_array(
+        occupancy_grid_map = GridMap(
             np.flip(map_array, 0), resolution, center_x, center_y
         )
 
@@ -558,7 +563,7 @@ class DhfLocalizationNode:
         cfg_random_seed = 2021  # TODO: maybe to parameter
         rng = np.random.default_rng(cfg_random_seed)
 
-        motion_model = OdometryMotionModel(
+        self.motion_model = OdometryMotionModel(
             [
                 self.odometry_alpha_1,
                 self.odometry_alpha_2,
@@ -570,15 +575,13 @@ class DhfLocalizationNode:
 
         (
             robot_sensor_dx,
-            robot_sensor_dy,
-            robot_sensor_dyaw,
+            _,
+            _,
         ) = self.get_robot_sensor_transform()
         measurement_model = MeasurementModel(
             self.gridmap,
             self.laser_range_noise_std,
             robot_sensor_dx,
-            robot_sensor_dy,
-            robot_sensor_dyaw,
         )
 
         cfg_init_gaussian_mean = np.array(
@@ -592,39 +595,42 @@ class DhfLocalizationNode:
             ]
         )
 
+        particle_init_variables = [
+            cfg_init_gaussian_mean,
+            cfg_init_gaussian_covar,
+            rng,
+        ]
+
         self.measurement_processer = MeasurementProcessor(
             max_ray_number=self.max_ray_number
         )
-        self.ekf = EKF(motion_model, measurement_model)
-        self.edh = EDH(
-            motion_model=motion_model,
-            measurement_model=measurement_model,
-            particle_num=self.particles,
-            lambda_num=self.pseudo_timesteps,
-        )
-
-        self.prior = ParticleState.init_from_gaussian(
-            cfg_init_gaussian_mean,
-            cfg_init_gaussian_covar,
-            self.particles,
-            rng=rng,
-        )
+        self.ekf = EKF(measurement_model)
         self.ekf_prior = StateHypothesis(
             state_vector=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar
         )
+        self.ekf_track = Track(self.ekf_prior)
+
+        medh_updater = MEDHUpdater(
+            measurement_model, self.medh_lambda_number, self.medh_particle_number
+        )
+        self.medh = EDH(medh_updater, *particle_init_variables)
 
 
-def save_data(data, filename="topicexport.json"):
+def save_data(data, filename="topicexport"):
     """Saves data to a file in `json` format.
 
-    If run from VSCode debug mode, the file is saved to `~/.ros/` by default.
+    Saves the file into dhf_loc/assets/results.
 
     Args:
         data (:obj:`dict`): Data to be exported.
-        filename (:obj:`str`, optional): Name of the file with extension. Defaults to "topicexport.json".
+        filename (:obj:`str`, optional): Name of the file without extension. Defaults to "topicexport".
     """
 
-    with open(filename, "w") as file:
+    # get an instance of RosPack with the default search paths
+    rospack = rospkg.RosPack()
+    path = rospack.get_path("dhf_loc") + "/assets/results/" + filename + ".json"
+
+    with open(path, "w") as file:
         json.dump({"data": data}, file)
 
 
@@ -633,4 +639,4 @@ if __name__ == "__main__":
     rospy.spin()
 
     if dhf_localization_node.export_data:
-        rospy.on_shutdown(lambda: save_data(dhf_localization_node.topicdata))
+        rospy.on_shutdown(lambda: save_data(dhf_localization_node.topicdata, "test"))
