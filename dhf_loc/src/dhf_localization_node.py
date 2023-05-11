@@ -22,7 +22,7 @@ from dhflocalization.filters import EDH, EKF
 from dhflocalization.filters.updaters import MEDHUpdater
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
-from dhflocalization.customtypes import StateHypothesis, Track
+from dhflocalization.customtypes import StateHypothesis
 
 from nav_msgs.srv import GetMap
 from nav_msgs.msg import Odometry
@@ -130,6 +130,8 @@ class DhfLocalizationNode:
         self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
+        self.only_ekf = rospy.get_param("~only_ekf")
+
         # Generic attributes
         self.ekf_prior = None
         self.filter_initialized = False
@@ -137,7 +139,6 @@ class DhfLocalizationNode:
         self.gridmap = None
         self.motion_model = None
         self.last_comptime = None
-        self.current_ground_truth = None
         if self.export_data:
             self.topicdata = []
 
@@ -210,37 +211,33 @@ class DhfLocalizationNode:
         measurement = self.process_scan(scan)
         measurement = self.measurement_processer.filter_measurements(measurement)
 
+        # ekf
         ekf_prediction = self.motion_model.propagate(self.ekf_prior, control_input)
+        ekf_posterior, _ = self.ekf.update(ekf_prediction, measurement)
+        self.ekf_prior = ekf_posterior
 
-        for filter in [self.medh]:
-            prior = filter.last_particle_posterior
+        # edh
+        if not self.only_ekf:
+            prior = self.medh.last_particle_posterior
             prediction = self.motion_model.propagate_particles(prior, control_input)
 
             prediction_covar = ekf_prediction.covar
-            posterior = filter.update(
+            posterior = self.medh.update(
                 prediction, prediction_covar, measurement, return_posterior=True
             )
+            posterior_mean = posterior.mean()
+        else:
+            posterior_mean = ekf_posterior.state_vector
 
-            map_to_base_tr = self.transformation_matrix_from_state(posterior.mean())
-            base_to_odom = self.tf_buffer.lookup_transform(
-                self.robot_base_frame, self.odom_frame, rospy.Time()
-            )
-            base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
-            map_to_odom_msg = self.msg_from_transformation_matrix(
-                map_to_base_tr @ base_to_odom_tr, detection_timestamp
-            )
+        self.broadcast_pose(posterior_mean, detection_timestamp)
 
-            self.tf_broadcaster.sendTransform(map_to_odom_msg)
+        if not self.filter_initialized:
+            self.filter_initialized = True
 
-            if not self.filter_initialized:
-                self.filter_initialized = True
-
-        ekf_posterior, _ = self.ekf.update(ekf_prediction, measurement)
-        self.ekf_track.append(ekf_posterior)
-        self.ekf_prior = ekf_posterior
         self.prev_odom = odom
-        comptime_end = time.time()
 
+        # calculate and publish comptime
+        comptime_end = time.time()
         comptime = (comptime_end - comptime_start) * 1e3  # in ms
         comptime_msg = FloatStamped()
         comptime_msg.header.stamp = rospy.Time.now()
@@ -250,7 +247,19 @@ class DhfLocalizationNode:
         self.pub_comptime.publish(comptime_msg)
 
         if self.export_data:
-            self.log_data(truth, posterior.mean(), comptime, detection_timestamp)
+            self.log_data(truth, posterior_mean, comptime, detection_timestamp)
+
+    def broadcast_pose(self, state, timestamp):
+        map_to_base_tr = self.transformation_matrix_from_state(state)
+        base_to_odom = self.tf_buffer.lookup_transform(
+            self.robot_base_frame, self.odom_frame, rospy.Time()
+        )
+        base_to_odom_tr = self.transformation_matrix_from_msg(base_to_odom)
+        map_to_odom_msg = self.msg_from_transformation_matrix(
+            map_to_base_tr @ base_to_odom_tr, timestamp
+        )
+
+        self.tf_broadcaster.sendTransform(map_to_odom_msg)
 
     def cb_waiting_timer(self, _):
         """Callback to periodically check for missing messages and services.
@@ -499,30 +508,6 @@ class DhfLocalizationNode:
         max_val = map_array.max()
         return np.where(map_array < max_val, 0, 1)
 
-    def broadcast_pose(self, pose):  # TODO remove
-        """Broadcast the transormation between the map and the robot.
-
-        Uses the `map` frame as a base and the `base_footprint` as the child.
-
-        Args:
-            pose (:obj:`(3,1) np.ndarray`): Array containing the x,y poses and the yaw angle.
-        """
-        transform = TransformStamped()
-        transform.header.stamp = rospy.Time.now()
-        transform.header.frame_id = self.global_frame
-        transform.child_frame_id = self.robot_base_frame
-        transform.transform.translation.x = pose[0]
-        transform.transform.translation.y = pose[1]
-        transform.transform.translation.z = 0.0
-
-        quat = quaternion_from_euler(0, 0, pose[2])
-        transform.transform.rotation.x = quat[0]
-        transform.transform.rotation.y = quat[1]
-        transform.transform.rotation.z = quat[2]
-        transform.transform.rotation.w = quat[3]
-
-        self.tf_broadcaster.sendTransform(transform)
-
     def get_robot_sensor_transform(self):
         """Determines the static transform between the robot and the sensor.
 
@@ -605,7 +590,6 @@ class DhfLocalizationNode:
         self.ekf_prior = StateHypothesis(
             state_vector=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar
         )
-        self.ekf_track = Track(self.ekf_prior)
 
         medh_updater = MEDHUpdater(
             measurement_model, self.medh_lambda_number, self.medh_particle_number
