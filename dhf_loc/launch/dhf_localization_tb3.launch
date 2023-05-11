@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="map_name" default="tb3_house_true" doc="Name of the map yaml file without extension, contained in the assets folder." />
+    <arg name="map_name" default="tb3_house_true"
+        doc="Name of the map yaml file without extension, contained in the assets folder." />
 
     <include file="$(find turtlebot3_gazebo)/launch/turtlebot3_house.launch">
         <arg name="sensor_update_rate" value="10" />
-        <arg name="encoder_noise_factor" value="0.01" />
+        <arg name="encoder_noise_factor" value="0.0001" />
     </include>
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
@@ -12,9 +13,11 @@
         <param name="tf_prefix" value="" />
     </node>
 
-    <node name="map_server" pkg="map_server" type="map_server" output="screen" args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
+    <node name="map_server" pkg="map_server" type="map_server" output="screen"
+        args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
 
-    <node name="rviz" pkg="rviz" type="rviz" output="screen" args="-d $(find dhf_loc)/rviz/default.rviz" />
+    <node name="rviz" pkg="rviz" type="rviz" output="screen"
+        args="-d $(find dhf_loc)/rviz/default.rviz" />
 
 
 </launch>
