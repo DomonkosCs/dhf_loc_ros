@@ -183,8 +183,8 @@ class DhfLocalizationNode:
             odom_msg (:obj:`nav_msgs.msg.Odometry`): Odom message from the wheel encoders.
         """
 
-        if self.last_detection_since_epoch is not None:
-            rospy.loginfo(time.time() - self.last_detection_since_epoch)
+        # if self.last_detection_since_epoch is not None:
+        #     rospy.loginfo(time.time() - self.last_detection_since_epoch)
         self.last_detection_since_epoch = (
             time.time()
         )  # not simulated time, used for timeout detection
@@ -205,9 +205,6 @@ class DhfLocalizationNode:
             self.init_filter()
 
         control_input = [self.prev_odom, odom]
-        if not self.check_update_required(control_input) and self.filter_initialized:
-            rospy.loginfo("Filter update is not required")
-            return
 
         comptime_start = time.time()
         measurement = self.process_scan(scan)
