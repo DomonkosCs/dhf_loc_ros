@@ -433,7 +433,7 @@ class DhfLocalizationNode:
             :obj:`list of (angle,range)`
 
         """
-        angles = np.linspace(0, 2 * np.pi, len(scan), endpoint=False)
+        angles = np.linspace(0, 2 * np.pi, len(scan))
         angle_range = [
             (angle, range) for angle, range in zip(angles, scan) if range is not None
         ]
