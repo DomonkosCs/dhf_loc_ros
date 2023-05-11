@@ -52,6 +52,7 @@
   <depend>rospy</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>naoqi_bridge_msgs</depend>
   <depend>message_filters</depend>
   <depend>tf</depend>
 
