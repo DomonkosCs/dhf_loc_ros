@@ -38,4 +38,4 @@ initial_cov_heading: 0.0025
 # Other
 translation_threshold: 0.001
 rotation_threshold: 0.001
-export_data: True
+export_data: False
