@@ -4,12 +4,16 @@
     <arg name="node_name" default="dhf_localization_node" doc="Name of the node" />
     <arg name="param_file_name" default="default" doc="Parameter file name" />
     <arg name="edh_type" default="medh" />
+    <arg name="medh_lambda_number" default="10" />
+    <arg name="naedh_step_number" default="10" />
 
 
     <node pkg="$(arg pkg_name)" type="$(arg node_name).py" name="$(arg node_name)" output="screen">
         <rosparam command="load"
             file="$(find dhf_loc)/config/$(arg node_name)/$(arg param_file_name).yaml" />
         <param name="edh_type" value="$(arg edh_type)" />
+        <param name="medh_lambda_number" value="$(arg medh_lambda_number)" />
+        <param name="naedh_step_number" value="$(arg naedh_step_number)" />
     </node>
 
 </launch>

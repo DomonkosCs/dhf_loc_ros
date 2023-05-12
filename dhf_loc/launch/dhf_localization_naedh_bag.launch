@@ -6,7 +6,9 @@
     <arg name="mc" default="1" />
     <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]" />
     <arg name="info" default="" />
-    <arg name="result_export_file_name" default="naedh_$(arg info)_mc$(arg mc)_$(arg bag)" />
+    <arg name="lambda_number" default="10" />
+    <arg name="result_export_file_name"
+        default="naedh_$(arg info)_lambda$(arg lambda_number)_mc$(arg mc)_$(arg bag)" />
 
 
     <param name="/use_sim_time" value="true" />
@@ -21,6 +23,7 @@
     <include file="$(find dhf_loc)/launch/dhf_localization_node.launch">
         <arg name="param_file_name" value="simu" />
         <arg name="edh_type" value="naedh" />
+        <arg name="naedh_step_number" value="$(arg lambda_number)" />
     </include>
 
     <!-- -s 543 -u 75 - -->

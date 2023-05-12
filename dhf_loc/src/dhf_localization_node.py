@@ -19,7 +19,7 @@ from tf.transformations import (
 
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
-from dhflocalization.filters.updaters import MEDHUpdater,NAEDHUpdater
+from dhflocalization.filters.updaters import MEDHUpdater, NAEDHUpdater
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
 from dhflocalization.customtypes import StateHypothesis
@@ -112,6 +112,8 @@ class DhfLocalizationNode:
         self.medh_lambda_number = rospy.get_param("~medh_lambda_number")
         self.naedh_step_number = rospy.get_param("~naedh_step_number")
         self.naedh_particle_number = rospy.get_param("~naedh_particle_number")
+        rospy.loginfo(self.medh_lambda_number)
+        rospy.loginfo(self.naedh_step_number)
 
         self.max_ray_number = rospy.get_param("~max_ray_number")
         self.laser_range_noise_std = rospy.get_param("~laser_range_noise_std")
@@ -132,7 +134,9 @@ class DhfLocalizationNode:
         self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
-        self.edh_type = rospy.get_param("~edh_type") # ["medh","naedh"], TODO check empty
+        self.edh_type = rospy.get_param(
+            "~edh_type"
+        )  # ["medh","naedh"], TODO check empty
 
         # Generic attributes
         self.ekf_prior = None
@@ -609,8 +613,6 @@ class DhfLocalizationNode:
         else:
             rospy.loginfo("Defaulting to EKF filter")
             self.only_ekf = True
-
-        
 
 
 def save_data(data, filename="topicexport"):
