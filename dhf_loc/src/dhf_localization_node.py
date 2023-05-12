@@ -19,7 +19,7 @@ from tf.transformations import (
 
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
-from dhflocalization.filters.updaters import MEDHUpdater
+from dhflocalization.filters.updaters import MEDHUpdater,NAEDHUpdater
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
 from dhflocalization.customtypes import StateHypothesis
@@ -108,8 +108,10 @@ class DhfLocalizationNode:
         self.transform_tolerance = rospy.get_param("~transform_tolerance")
         self.detection_tolerance = rospy.get_param("~detection_tolerance")
 
-        self.medh_particle_number = rospy.get_param("~particles")
-        self.medh_lambda_number = rospy.get_param("~pseudo_timesteps")
+        self.medh_particle_number = rospy.get_param("~medh_particle_number")
+        self.medh_lambda_number = rospy.get_param("~medh_lambda_number")
+        self.naedh_step_number = rospy.get_param("~naedh_step_number")
+        self.naedh_particle_number = rospy.get_param("~naedh_particle_number")
 
         self.max_ray_number = rospy.get_param("~max_ray_number")
         self.laser_range_noise_std = rospy.get_param("~laser_range_noise_std")
@@ -130,7 +132,7 @@ class DhfLocalizationNode:
         self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
-        self.only_ekf = rospy.get_param("~only_ekf")
+        self.edh_type = rospy.get_param("~edh_type") # ["medh","naedh"], TODO check empty
 
         # Generic attributes
         self.ekf_prior = None
@@ -218,11 +220,11 @@ class DhfLocalizationNode:
 
         # edh
         if not self.only_ekf:
-            prior = self.medh.last_particle_posterior
+            prior = self.edh.last_particle_posterior
             prediction = self.motion_model.propagate_particles(prior, control_input)
 
             prediction_covar = ekf_prediction.covar
-            posterior = self.medh.update(
+            posterior = self.edh.update(
                 prediction, prediction_covar, measurement, return_posterior=True
             )
             posterior_mean = posterior.mean()
@@ -591,10 +593,24 @@ class DhfLocalizationNode:
             state_vector=cfg_init_gaussian_mean, covar=cfg_init_gaussian_covar
         )
 
-        medh_updater = MEDHUpdater(
-            measurement_model, self.medh_lambda_number, self.medh_particle_number
-        )
-        self.medh = EDH(medh_updater, *particle_init_variables)
+        self.only_ekf = False
+        if self.edh_type == "medh":
+            rospy.loginfo("Using MEDH filter")
+            medh_updater = MEDHUpdater(
+                measurement_model, self.medh_lambda_number, self.medh_particle_number
+            )
+            self.edh = EDH(medh_updater, *particle_init_variables)
+        elif self.edh_type == "naedh":
+            rospy.loginfo("Using NAEDH filter")
+            naedh_updater = NAEDHUpdater(
+                measurement_model, self.naedh_step_number, self.naedh_particle_number
+            )
+            self.edh = EDH(naedh_updater, *particle_init_variables)
+        else:
+            rospy.loginfo("Defaulting to EKF filter")
+            self.only_ekf = True
+
+        
 
 
 def save_data(data, filename="topicexport"):

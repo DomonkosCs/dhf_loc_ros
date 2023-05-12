@@ -14,8 +14,11 @@ transform_tolerance: 0.5
 detection_tolerance: 0.05
 
 # Filter-specific
-particles: 100
-pseudo_timesteps: 10
+medh_particle_number: 100
+naedh_particle_number: 100
+
+medh_lambda_number: 10
+naedh_step_number: 10
 
 # Measurement model
 max_ray_number: 500
