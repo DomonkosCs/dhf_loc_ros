@@ -19,11 +19,12 @@
         args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
 
     <include file="$(find dhf_loc)/launch/dhf_localization_node.launch">
-        <arg name="param_file_name" value="simu_clip" />
+        <arg name="param_file_name" value="simu" />
     </include>
 
+    <!-- -s 543 -u 75 - -->
     <node name="rosbag" pkg="rosbag" type="play" output="screen" required="true"
-        args="-s 543 -u 75 --clock $(find dhf_loc)/assets/bags/$(arg bag).bag " />
+        args="--clock $(find dhf_loc)/assets/bags/$(arg bag).bag " />
 
     <node name="robot_pose_publisher" pkg="robot_pose_publisher" type="robot_pose_publisher">
         <param name="is_stamped" value="true" />
