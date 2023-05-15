@@ -545,7 +545,7 @@ class DhfLocalizationNode:
 
     def init_filter(self):
         """Initializes the filters using the ROS parameter server."""
-        cfg_random_seed = 2021  # TODO: maybe to parameter
+        cfg_random_seed = int(time.time_ns())
         rng = np.random.default_rng(cfg_random_seed)
 
         self.motion_model = OdometryMotionModel(
