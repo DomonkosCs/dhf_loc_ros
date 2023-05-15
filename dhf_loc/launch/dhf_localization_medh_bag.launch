@@ -2,7 +2,7 @@
 <launch>
     <arg name="map_name" default="gt_map_01_table"
         doc="Name of the map yaml file without extension, contained in the assets folder." />
-    <arg name="bag" default="5hz_o1e-4_l1e-2_filtered" />
+    <arg name="bag" default="5hz_o5e-4_l2e-2" />
     <arg name="mc" default="1" />
     <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]" />
     <arg name="info" default="" />
@@ -25,7 +25,7 @@
 
     <!-- -s 543 -u 75 - -->
     <node name="rosbag" pkg="rosbag" type="play" output="screen" required="true"
-        args="--clock $(find dhf_loc)/assets/bags/$(arg bag).bag " />
+        args="--clock -d 3 $(find dhf_loc)/assets/bags/$(arg bag).bag " />
 
     <node name="robot_pose_publisher" pkg="robot_pose_publisher" type="robot_pose_publisher">
         <param name="is_stamped" value="true" />
@@ -40,7 +40,7 @@
     </node>
 
 
-    <node pkg="rviz" type="rviz" name="rviz"
-        args="-d $(find turtlebot3_navigation)/rviz/turtlebot3_navigation.rviz" />
+    <!-- <node pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find turtlebot3_navigation)/rviz/turtlebot3_navigation.rviz" /> -->
 
 </launch>
