@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/home/domonkos/dhf-localization/env/bin/python
+
 import numpy as np
 import json
 import time
