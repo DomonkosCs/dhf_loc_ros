@@ -22,7 +22,7 @@ naedh_step_number: 10
 
 # Measurement model
 max_ray_number: 360
-laser_range_noise_std: 0.01
+laser_range_noise_std: 0.02
 
 # Motion model
 odometry_alpha_1: 0.1
@@ -31,9 +31,9 @@ odometry_alpha_3: 0.1
 odometry_alpha_4: 0.1
 
 # Initialization
-initial_pose_x: -6.598
-initial_pose_y: 1.699
-initial_pose_heading: -1.644
+initial_pose_x: -6.217
+initial_pose_y: 0.649
+initial_pose_heading: 1.566
 initial_cov_x: 0.01
 initial_cov_y: 0.01
 initial_cov_heading: 0.0025

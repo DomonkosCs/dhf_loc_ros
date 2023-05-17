@@ -22,7 +22,7 @@ naedh_step_number: 10
 
 # Measurement model
 max_ray_number: 360
-laser_range_noise_std: 0.01
+laser_range_noise_std: 0.02
 
 # Motion model
 odometry_alpha_1: 0.1
