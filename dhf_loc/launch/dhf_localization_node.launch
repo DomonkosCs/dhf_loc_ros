@@ -4,6 +4,7 @@
     <arg name="node_name" default="dhf_localization_node" doc="Name of the node" />
     <arg name="param_file_name" default="default" doc="Parameter file name" />
     <arg name="edh_type" default="medh" />
+    <arg name="lambda_num" default="10" />
     <arg name="venv" default="/home/domonkos/dhf-localization/env/bin/python" />
 
 
@@ -12,6 +13,7 @@
         <rosparam command="load"
             file="$(find dhf_loc)/config/$(arg node_name)/$(arg param_file_name).yaml" />
         <param name="edh_type" value="$(arg edh_type)" />
+        <param name="lambda_num" value="$(arg lambda_num)" />
     </node>
 
 </launch>

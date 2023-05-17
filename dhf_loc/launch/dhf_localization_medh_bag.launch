@@ -6,7 +6,9 @@
     <arg name="mc" default="1" />
     <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]" />
     <arg name="info" default="" />
-    <arg name="result_export_file_name" default="medh_$(arg info)_mc$(arg mc)_$(arg bag)" />
+    <arg name="lambda_num" default="10" />
+    <arg name="result_export_file_name"
+        default="medh_$(arg info)_l$(arg lambda_num)_mc$(arg mc)_$(arg bag)" />
 
 
     <param name="/use_sim_time" value="true" />
@@ -21,9 +23,10 @@
     <include file="$(find dhf_loc)/launch/dhf_localization_node.launch">
         <arg name="param_file_name" value="simu" />
         <arg name="edh_type" value="medh" />
+        <arg name="lambda_num" value="$(arg lambda_num)" />
     </include>
 
-    <!-- -s 543 -u 75 - -->
+    <!-- -s 646 -u 60  -->
     <node name="rosbag" pkg="rosbag" type="play" output="screen" required="true"
         args="--clock -d 3 $(find dhf_loc)/assets/bags/$(arg bag).bag " />
 
