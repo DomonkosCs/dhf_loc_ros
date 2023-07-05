@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="map_name" default="gt_map_01_table"
+    <arg name="map_name" default="gt_map_01"
         doc="Name of the map yaml file without extension, contained in the assets folder." />
     <arg name="bag" default="" />
     <arg name="mc" default="1" />
