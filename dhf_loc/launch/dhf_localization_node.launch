@@ -1,5 +1,4 @@
 <launch>
-    <!-- <arg name="param_file_name" default="default" doc="Specify a param file. ex:megaman" /> -->
     <arg name="pkg_name" default="dhf_loc" doc="Name of the package" />
     <arg name="node_name" default="dhf_localization_node" doc="Name of the node" />
     <arg name="param_file_name" default="default" doc="Parameter file name" />
