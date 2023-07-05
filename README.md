@@ -19,3 +19,15 @@ git submodule update
 
 ## Usage
 
+### Demo
+For a demo, launch the `dhf_loc/launch/dhf_localization_tb3.launch` file. This starts a Gazebo simulation, and localizes the TurtleBot3 robot in the TurtbleBot3 House environment, using the Mean Exact Particle Flow Daum--Huang filter (MEDH).
+Details of the algorithm can be found in the [paper](https://github.com/DomonkosCs/dhf-localization/blob/main/paper.pdf). You can move the robot around by running
+```
+rosrun turtlebot3_teleop turtlebot3_teleop_key
+```
+
+The parameters of the package are documented inside `dhf_loc/src/dhf_localization_node.py`, and can be changed in `dhf_loc/config/dhf_localization_node/simu.yaml`.
+
+### Reproducing the paper
+
+The results in the paper are acquired by running the dhf_loc/launch/dhf_localization_<VAR>_bag.launch files, where <VAR> corresponds to the inspected localization algorithm. For details, see the comments inside the launch files.
