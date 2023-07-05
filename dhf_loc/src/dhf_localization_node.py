@@ -133,7 +133,7 @@ class DhfLocalizationNode:
         self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
-        self.edh_type = rospy.get_param("~edh_type") # ["medh","naedh"], TODO check empty
+        self.edh_type = rospy.get_param("~edh_type") # ["medh","naedh",""], if "", ekf is used 
 
         # Generic attributes
         self.ekf_prior = None
@@ -598,7 +598,7 @@ class DhfLocalizationNode:
         if self.edh_type == "medh":
             rospy.loginfo("Using MEDH filter")
             medh_updater = MEDHUpdater(
-                measurement_model, self.medh_lambda_number, self.medh_particle_number
+                measurement_model, self.medh_lambda_number, "lin", self.medh_particle_number
             )
             self.edh = EDH(medh_updater, *particle_init_variables)
         elif self.edh_type == "naedh":
