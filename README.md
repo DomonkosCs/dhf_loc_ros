@@ -30,4 +30,4 @@ The parameters of the package are documented inside `dhf_loc/src/dhf_localizatio
 
 ### Reproducing the paper
 
-The results in the paper are acquired by running the dhf_loc/launch/dhf_localization_<VAR>_bag.launch files, where <VAR> corresponds to the inspected localization algorithm. For details, see the comments inside the launch files.
+The results in the paper are acquired by running the dhf_loc/launch/dhf_localization_XXXX_bag.launch files, where XXXX corresponds to the inspected localization algorithm. For details, see the comments inside the launch files.
