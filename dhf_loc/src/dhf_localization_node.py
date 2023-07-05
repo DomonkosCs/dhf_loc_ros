@@ -46,7 +46,10 @@ class DhfLocalizationNode:
         ~detection_tolerance (:obj:`float`): Tolerance in seconds between the `LaserScan` and the `Odometry` message
         to be associated together.
 
-        ~particles (:obj:`int`): Number of particles to be used in the particle flow filter.
+        ~medh_particle_number (:obj:`int`): Number of particles to be used in the mean particle flow filter.
+        ~naedh_particle_number (:obj:`int`): Number of particles to be used in the n-step analytic particle flow filter.
+        ~medh_lambda_number (:obj:`int`): Number of lambda steps to be used in the mean particle flow filter.
+        ~naedh_step_number (:obj:`int`): Number of  steps to be used in the n-step analytic particle flow filter.
         ~pseudo_timesteps (:obj:`int`): Number of equal homotopy steps to perform the filter update.
 
         ~max_ray_number (:obj:`int`): Max number of laser rays to be used. Unused rays are eliminated
@@ -77,20 +80,22 @@ class DhfLocalizationNode:
 
         ~export_data (:obj:`bool`): Export sensor data and filter output. Defaults to false.
 
+        ~edh_type (:obj: `string`): Which variant of the particle flow filter to used.
+        Either 'medh', 'naedh' or '', where the latter corresponds to the extended Kalman Filter.
 
     Subscribers:
-        ~scan_topic (:obj:`sensros_msgs.msg.LaserScan`): Range readings from the LiDAR. Defaults to `/scan`.
-        ~odom_topic (:obj:`nav_msgs.msg.Odometry`): The odometry of the differential drive robot. Defaults to `/odom`.
+        ~scan_topic (:obj:`sensros_msgs.msg.LaserScan`): Range readings from the LiDAR.
+        ~odom_topic (:obj:`nav_msgs.msg.Odometry`): The odometry of the differential drive robot.
 
     Called Services:
-        ~static_map_srv (:obj:`nav_msgs.srv.GetMap`): The static map to be localized on. Defaults to `static_map`.
+        ~static_map_srv (:obj:`nav_msgs.srv.GetMap`): The static map to be localized on.
 
     Required Transforms:
-        ~robot_base_frame, defaults to `base_footprint`: -> ~odom_frame, defaults to `odom`.
-        ~scan_frame, defaults to `scan`: -> ~robot_base_frame.
+        ~robot_base_frame -> ~odom_frame.
+        ~scan_frame -> ~robot_base_frame.
 
     Provided Transform:
-        ~global_frame, defaults to `map`: -> ~odom_frame, defaults to `odom`
+        ~global_frame -> ~odom_frame
 
     """
 
@@ -129,11 +134,9 @@ class DhfLocalizationNode:
         self.initial_cov_y = rospy.get_param("~initial_cov_y")
         self.initial_cov_heading = rospy.get_param("~initial_cov_heading")
 
-        self.translation_threshold = rospy.get_param("~translation_threshold")
-        self.rotation_threshold = rospy.get_param("~rotation_threshold")
         self.export_data = rospy.get_param("~export_data")
 
-        self.edh_type = rospy.get_param("~edh_type") # ["medh","naedh",""], if "", ekf is used 
+        self.edh_type = rospy.get_param("~edh_type") 
 
         # Generic attributes
         self.ekf_prior = None
@@ -294,18 +297,6 @@ class DhfLocalizationNode:
 
         if need_print:
             self.last_print_time = time.time()
-
-    def check_update_required(self, control_input):
-        diff = np.abs(np.asarray(control_input[0]) - np.asarray(control_input[1]))
-        diff_x = diff[0]
-        diff_y = diff[1]
-        diff_yaw = diff[2]
-
-        return (
-            diff_x > self.translation_threshold
-            or diff_y > self.translation_threshold
-            or diff_yaw > self.rotation_threshold
-        )
 
     def log_data(self, truth, pose, comptime, timestamp):
         self.topicdata.append(
