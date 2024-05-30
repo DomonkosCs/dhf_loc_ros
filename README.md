@@ -10,6 +10,8 @@ The package is only tested inside the the workspace of [dhf_loc_ws](https://gith
 After cloning the workspace, you can install them via
 ` vcs import < dhf_loc.rosinstall`, which requires the `python3-vcstool` package.
 
+To install dependencies, run `rosdep install --from-paths src --ignore-src -r -y` from the root of the workspace.
+
 **Important**: This package contains the [DHF localization algorithm](https://github.com/DomonkosCs/dhf-localization) library as a git submodule. After cloning this repo (either directly, or from the `.rosinstall` file),
 you have to run the following commands inside the root of this repository (where the `.gitmodules` file is located)
 ```
