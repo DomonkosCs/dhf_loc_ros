@@ -19,6 +19,9 @@ git submodule init
 git submodule update
 ```
 
+Then create a virtual environment in the cloned directory with `python -m venv env`. Source the environment, and install the dependencies by `pip install -r requirements.txt`.
+
+
 ## Usage
 
 ### Demo
