@@ -399,7 +399,7 @@ class DhfLocalizationNode:
         """Appends angles to the range-only scan readings.
 
         Assumes that every range reading is evenly distributed accross 360 degs.
-        Ranges with value `None` are excluded together with their angle.
+        Ranges with value `None` or 0.0 are excluded together with their angle.
 
         Args:
             scan (:obj:`list`): Range readings.
@@ -410,7 +410,9 @@ class DhfLocalizationNode:
         """
         angles = np.linspace(0, 2 * np.pi, len(scan))
         angle_range = [
-            (angle, range) for angle, range in zip(angles, scan) if range is not None
+            (angle, range)
+            for angle, range in zip(angles, scan)
+            if range is not None and range != 0.0
         ]
         return angle_range
 
