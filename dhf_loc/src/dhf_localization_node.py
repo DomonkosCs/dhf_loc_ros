@@ -1,5 +1,3 @@
-#!/home/domonkos/dhf-localization/env/bin/python
-
 import numpy as np
 import json
 import time
@@ -20,7 +18,7 @@ from tf.transformations import (
 
 from dhflocalization.gridmap import GridMap
 from dhflocalization.filters import EDH, EKF
-from dhflocalization.filters.updaters import MEDHUpdater,NAEDHUpdater
+from dhflocalization.filters.updaters import MEDHUpdater, NAEDHUpdater
 from dhflocalization.kinematics import OdometryMotionModel
 from dhflocalization.measurement import MeasurementModel, MeasurementProcessor
 from dhflocalization.customtypes import StateHypothesis
@@ -78,8 +76,6 @@ class DhfLocalizationNode:
         ~initial_cov_heading (:obj:`float`): Initial covariance of `heading` (`heading*heading`),
         used as the covariance in initializing the filter by a Gaussian distribution.
 
-        ~export_data (:obj:`bool`): Export sensor data and filter output. Defaults to false.
-
         ~edh_type (:obj: `string`): Which variant of the particle flow filter to used.
         Either 'medh', 'naedh' or '', where the latter corresponds to the extended Kalman Filter.
 
@@ -134,9 +130,7 @@ class DhfLocalizationNode:
         self.initial_cov_y = rospy.get_param("~initial_cov_y")
         self.initial_cov_heading = rospy.get_param("~initial_cov_heading")
 
-        self.export_data = rospy.get_param("~export_data")
-
-        self.edh_type = rospy.get_param("~edh_type") 
+        self.edh_type = rospy.get_param("~edh_type")
 
         # Generic attributes
         self.ekf_prior = None
@@ -145,18 +139,13 @@ class DhfLocalizationNode:
         self.gridmap = None
         self.motion_model = None
         self.last_comptime = None
-        if self.export_data:
-            self.topicdata = []
 
         # Subscribers
         self.sub_scan = message_filters.Subscriber(self.scan_topic, LaserScan)
         self.sub_odom = message_filters.Subscriber(self.odom_topic, Odometry)
-        self.sub_truth = message_filters.Subscriber(
-            "/ground_truth/state", Odometry
-        )  # TODO
 
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
-            [self.sub_scan, self.sub_odom, self.sub_truth],
+            [self.sub_scan, self.sub_odom],
             100,
             self.detection_tolerance,
         )
@@ -180,7 +169,7 @@ class DhfLocalizationNode:
         self.srv_get_map = rospy.ServiceProxy(self.static_map_srv, GetMap)
         self.gridmap = self.get_map()  # blocks
 
-    def cb_scan_odom(self, scan_msg, odom_msg, truth_msg):
+    def cb_scan_odom(self, scan_msg, odom_msg):
         """Callback to handle the sensor messages.
 
         This is only called if the two sensor messages are sufficiently close in time.
@@ -201,7 +190,6 @@ class DhfLocalizationNode:
 
         detection_timestamp = scan_msg.header.stamp.to_sec()  # almost the same as odom
         odom = self.extract_odom_msg(odom_msg)
-        truth = self.extract_odom_msg(truth_msg)
         scan = self.extract_scan_msg(scan_msg)
 
         if self.prev_odom is None:
@@ -252,9 +240,6 @@ class DhfLocalizationNode:
         self.last_comptime = comptime
         self.pub_comptime.publish(comptime_msg)
 
-        if self.export_data:
-            self.log_data(truth, posterior_mean, comptime, detection_timestamp)
-
     def broadcast_pose(self, state, timestamp):
         map_to_base_tr = self.transformation_matrix_from_state(state)
         base_to_odom = self.tf_buffer.lookup_transform(
@@ -297,16 +282,6 @@ class DhfLocalizationNode:
 
         if need_print:
             self.last_print_time = time.time()
-
-    def log_data(self, truth, pose, comptime, timestamp):
-        self.topicdata.append(
-            {
-                "t": timestamp,
-                "truth": truth,
-                "pose": [pose[0], pose[1], pose[2]],
-                "comptime": comptime,
-            }
-        )
 
     def transformation_matrix_from_state(self, state):
         """Creates a homogeneous transformation matrix.
@@ -589,7 +564,10 @@ class DhfLocalizationNode:
         if self.edh_type == "medh":
             rospy.loginfo("Using MEDH filter")
             medh_updater = MEDHUpdater(
-                measurement_model, self.medh_lambda_number, "lin", self.medh_particle_number
+                measurement_model,
+                self.medh_lambda_number,
+                "lin",
+                self.medh_particle_number,
             )
             self.edh = EDH(medh_updater, *particle_init_variables)
         elif self.edh_type == "naedh":
@@ -602,30 +580,7 @@ class DhfLocalizationNode:
             rospy.loginfo("Defaulting to EKF filter")
             self.only_ekf = True
 
-        
-
-
-def save_data(data, filename="topicexport"):
-    """Saves data to a file in `json` format.
-
-    Saves the file into dhf_loc/assets/results.
-
-    Args:
-        data (:obj:`dict`): Data to be exported.
-        filename (:obj:`str`, optional): Name of the file without extension. Defaults to "topicexport".
-    """
-
-    # get an instance of RosPack with the default search paths
-    rospack = rospkg.RosPack()
-    path = rospack.get_path("dhf_loc") + "/assets/results/" + filename + ".json"
-
-    with open(path, "w") as file:
-        json.dump({"data": data}, file)
-
 
 if __name__ == "__main__":
     dhf_localization_node = DhfLocalizationNode()
     rospy.spin()
-
-    if dhf_localization_node.export_data:
-        rospy.on_shutdown(lambda: save_data(dhf_localization_node.topicdata, "test"))
