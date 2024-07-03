@@ -2,7 +2,7 @@
 import rospy
 import rospkg
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseStamped 
+from geometry_msgs.msg import PoseStamped
 from naoqi_bridge_msgs.msg import FloatStamped
 import json
 import message_filters
@@ -17,10 +17,17 @@ class LocalizationResultExporterNode:
         rospy.loginfo("Localization result exporter node created")
 
         self.export_file_name = rospy.get_param("~export_file_name")
+        self.truth_topic = rospy.get_param("~truth_topic")  # /odometry/filtered
+        self.pose_topic = rospy.get_param("~pose_topic", "/robot_pose")  # /robot_pose
+        self.comptime_topic = rospy.get_param(
+            "~comptime_topic", "/comptime"
+        )  # /comptime
 
-        self.sub_truth = message_filters.Subscriber('/ground_truth/state', Odometry)
-        self.sub_pose = message_filters.Subscriber('/robot_pose',PoseStamped)
-        self.sub_comptime = message_filters.Subscriber('/comptime',FloatStamped)
+        self.sub_truth = message_filters.Subscriber(self.truth_topic, Odometry)
+        self.sub_pose = message_filters.Subscriber(self.pose_topic, PoseStamped)
+        self.sub_comptime = message_filters.Subscriber(
+            self.comptime_topic, FloatStamped
+        )
 
         time_sync_sensors = message_filters.ApproximateTimeSynchronizer(
             [self.sub_truth, self.sub_pose, self.sub_comptime], 100, 0.1
@@ -29,18 +36,15 @@ class LocalizationResultExporterNode:
 
         self.topicdata = []
 
-
-    def cb_truth_pose(self,truth_msg,pose_msg, comptime_msg):
-        detection_timestamp = truth_msg.header.stamp.to_sec()  
+    def cb_truth_pose(self, truth_msg, pose_msg, comptime_msg):
+        detection_timestamp = truth_msg.header.stamp.to_sec()
 
         truth = self.extract_odom_msg(truth_msg)
         pose = self.extract_pose_msg(pose_msg)
 
         comptime = comptime_msg.data
 
-
         self.log_data(truth, pose, comptime, detection_timestamp)
-        
 
     def extract_odom_msg(self, odom_msg):
         """Creates a planar pose vector from the odom message.
@@ -103,13 +107,9 @@ class LocalizationResultExporterNode:
             timestamp (:obj:`genpy.rostime.Time`): Timestamp of the entry in secs.
         """
         self.topicdata.append(
-            {
-                "t": timestamp,
-                "truth": truth,
-                "pose": pose,
-                "comptime": comptime
-            }
+            {"t": timestamp, "truth": truth, "pose": pose, "comptime": comptime}
         )
+
 
 def save_data(data, filename="topicexport"):
     """Saves data to a file in `json` format.
@@ -138,5 +138,3 @@ if __name__ == "__main__":
             topicexporter_node.topicdata, topicexporter_node.export_file_name
         )
     )
-
-

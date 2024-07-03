@@ -44,12 +44,12 @@
         name="localization_result_exporter_node"
         output="screen">
         <param name="export_file_name" value="$(arg result_export_file_name)" />
-
+        <param name="truth_topic" value="/odometry/filtered" />
     </node>
 
 
     <!-- <node pkg="rviz" type="rviz" name="rviz"
-        args="-d $(find turtlebot3_navigation)/rviz/turtlebot3_navigation.rviz" /> -->
+        args="-d $(find dhf_loc)/rviz/real.rviz" /> -->
 
     <include file="$(find robot_localization)/launch/navsat_transform_template.launch" />
     <include file="$(find robot_localization)/launch/ekf_template.launch" />
