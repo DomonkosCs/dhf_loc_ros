@@ -15,11 +15,9 @@
 
     <param name="/use_sim_time" value="true" />
 
-    <!-- <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote.launch">
+    <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote_rtkgps.launch">
         <arg name="model" value="$(arg model)" />
-    </include> -->
-    <include
-        file="/home/kardosgabor95/catkin_ws/src/turtlebot3/turtlebot3_bringup/launch/turtlebot3_remote.launch" />
+    </include>
 
     <node name="map_server" pkg="map_server" type="map_server" output="screen"
         args="$(find dhf_loc)/assets/$(arg map_name).yaml" />
@@ -47,8 +45,8 @@
     </node>
 
 
-    <!-- <node pkg="rviz" type="rviz" name="rviz"
-        args="-d $(find dhf_loc)/rviz/real.rviz" /> -->
+    <node pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find dhf_loc)/rviz/real.rviz" />
 
     <include file="$(find robot_localization)/launch/navsat_transform_template.launch" />
     <include file="$(find robot_localization)/launch/ekf_template.launch" />
